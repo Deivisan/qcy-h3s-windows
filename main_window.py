@@ -162,7 +162,7 @@ class MainWindow(QMainWindow):
         title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         self._battery_label = QLabel("🔋 —")
         self._battery_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._game_mode_btn = QPushButton("Game Mode")
+        self._game_mode_btn = QPushButton("🎮 Game Mode")
         self._game_mode_btn.setCheckable(True)
         self._game_mode_btn.setEnabled(False)
         self._game_mode_btn.setToolTip("Modo de baixa latência para jogos")
