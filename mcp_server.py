@@ -48,6 +48,7 @@ async def list_tools():
         Tool(name="set_game_mode", description="Enable/disable game mode (low latency)", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
         Tool(name="get_game_mode", description="Get game mode state", inputSchema={"type": "object", "properties": {}}),
         Tool(name="get_eq", description="Get current EQ (10 bands)", inputSchema={"type": "object", "properties": {}}),
+        Tool(name="set_eq", description="Set EQ. offsets: list of 10 ints (1/100 dB), preset_id: 0=custom,1=rock,2=pop,3=classical,4=jazz,5=electronic,6=vocal", inputSchema={"type": "object", "properties": {"offsets": {"type": "array", "items": {"type": "integer"}}, "preset_id": {"type": "integer"}}, "required": ["offsets"]}),
         Tool(name="set_volume", description="Set volume L/R (0-100)", inputSchema={"type": "object", "properties": {"left": {"type": "integer"}, "right": {"type": "integer"}}, "required": ["left", "right"]}),
         Tool(name="music_control", description="Music control: 1=play, 2=pause, 3=prev, 4=next", inputSchema={"type": "object", "properties": {"action": {"type": "integer"}}, "required": ["action"]}),
         Tool(name="set_ldac", description="Enable/disable LDAC codec", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
@@ -129,6 +130,11 @@ async def call_tool(name: str, arguments: dict):
         elif name == "get_eq":
             eq = await dev.get_eq()
             result = f"EQ: {eq}"
+        elif name == "set_eq":
+            offsets = arguments["offsets"]
+            preset_id = arguments.get("preset_id", 0)
+            await dev.set_eq(offsets, preset_id)
+            result = f"EQ set: {offsets} preset={preset_id}"
         elif name == "set_volume":
             await dev.set_volume(arguments["left"], arguments["right"])
             result = f"Volume set L={arguments['left']} R={arguments['right']}"
