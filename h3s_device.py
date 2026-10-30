@@ -1,9 +1,11 @@
 """QCY H3 BLE device controller."""
 import asyncio
-import time
+import sys
+from types import SimpleNamespace
 from typing import Callable
 
 from bleak import BleakClient, BleakScanner
+from bleak.backends.device import BLEDevice
 
 from rcsp import AdvType, HEADER, OpCode, Packet, TYPE_COMMAND, hex_str
 
@@ -138,13 +140,24 @@ class H3SDevice:
         self.address = address
         self._client: BleakClient | None = None
         self._sn = 0
+        # BLE GATT command/response is a single RCSP channel. Concurrent
+        # coroutines can otherwise consume each other's sequence-number reply.
+        self._send_lock = asyncio.Lock()
         self._pending: dict[int, asyncio.Future[Packet]] = {}
         self._rx_buffer = bytearray()
         self.on_notification: Callable[[Packet], None] | None = None
         self.on_raw: Callable[[bytes], None] | None = None
 
-    async def connect(self) -> None:
-        self._client = BleakClient(self.address, timeout=15.0)
+    async def connect(self, on_disconnect=None) -> None:
+        # On Windows, passing a MAC string makes Bleak launch an implicit BLE
+        # scan. Paired/connected H3S devices often stop advertising, although
+        # WinRT can still resolve their cached BluetoothLEDevice by address.
+        target = _ble_device_for_address(self.address)
+        self._client = BleakClient(
+            target,
+            timeout=15.0,
+            disconnected_callback=on_disconnect,
+        )
         await self._client.connect()
         await self._client.start_notify(NOTIFY_UUID, self._handle_notify)
 
@@ -195,23 +208,24 @@ class H3SDevice:
                 self.on_notification(pkt)
 
     async def send(self, pkt: Packet, timeout: float = 2.0) -> Packet | None:
-        if not self._client or not self._client.is_connected:
-            raise RuntimeError("Not connected")
-        if pkt.sn == 0:
-            pkt.sn = self._next_sn()
-        data = pkt.encode()
-        fut: asyncio.Future[Packet] | None = None
-        if pkt.has_response:
-            fut = asyncio.get_running_loop().create_future()
-            self._pending[pkt.sn] = fut
-        await self._client.write_gatt_char(WRITE_UUID, data, response=False)
-        if fut is None:
-            return None
-        try:
-            return await asyncio.wait_for(fut, timeout=timeout)
-        except asyncio.TimeoutError:
-            self._pending.pop(pkt.sn, None)
-            return None
+        async with self._send_lock:
+            if not self._client or not self._client.is_connected:
+                raise RuntimeError("Not connected")
+            if pkt.sn == 0:
+                pkt.sn = self._next_sn()
+            data = pkt.encode()
+            fut: asyncio.Future[Packet] | None = None
+            if pkt.has_response:
+                fut = asyncio.get_running_loop().create_future()
+                self._pending[pkt.sn] = fut
+            await self._client.write_gatt_char(WRITE_UUID, data, response=False)
+            if fut is None:
+                return None
+            try:
+                return await asyncio.wait_for(fut, timeout=timeout)
+            except asyncio.TimeoutError:
+                self._pending.pop(pkt.sn, None)
+                return None
 
     async def notify_communication_way(self, way: int = 0, reconnect: int = 0) -> Packet | None:
         """Tell device we're on BLE (way=0) vs SPP (way=1). Required after BLE connect."""
@@ -352,9 +366,14 @@ class H3SDevice:
         return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x2C, 0x03, val, 0x01, 0x00])))
 
     async def set_music_mode(self, mode: int) -> Packet | None:
-        """Set audio scene mode (cmd 0x2E). 0=Music, 1=Movie, 2=Game (testar)."""
-        mode = _clamp(mode, 0, 4, "music mode")
+        """Set audio scene mode (cmd 0x2E): 0=Music, 1=Movie, 2=Game."""
+        mode = _clamp(mode, 0, 2, "music mode")
         return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x2E, 0x01, mode])))
+
+    async def get_music_mode(self) -> int | None:
+        """Read audio scene mode (cmd 0x2E), if returned by this firmware."""
+        params = await self.read_custom(0x2E)
+        return params[2] if params and len(params) >= 3 else None
 
     async def set_multipoint(self, enabled: bool) -> Packet | None:
         """Enable/disable multipoint (dual connection) (cmd 0x24).
@@ -910,6 +929,35 @@ class H3SDevice:
 
 # UUID do serviço RCSP/JieLi do QCY H3S (usado para filtrar o scan)
 QCY_SERVICE_UUID = "0000a002-0000-1000-8000-00805f9b34fb"
+# Endereço BLE GATT validado no hardware H3S deste projeto. O Windows pode
+# não anunciar o GATT quando o headset já está conhecido/conectado; o MAC
+# clássico mostrado em Configurações Bluetooth não é intercambiável com este.
+QCY_H3S_BLE_ADDRESS = "84:AC:60:F8:A6:BF"
+_BLE_DEVICE_CACHE: dict[str, BLEDevice] = {}
+
+
+def _ble_device_for_address(address: str):
+    """Prefer the scanned BLEDevice; on Windows resolve a cached device w/o scan.
+
+    Bleak's WinRT backend accepts BLEDevice and uses its native bluetooth
+    address directly. This avoids its implicit discovery, which fails when a
+    paired headset is connected/cached but not advertising.
+    """
+    cached = _BLE_DEVICE_CACHE.get(address.casefold())
+    if cached is not None:
+        return cached
+    if sys.platform != "win32":
+        return address
+    try:
+        from bleak.backends.winrt.scanner import RawAdvData
+
+        mac_int = int(address.replace(":", "").replace("-", ""), 16)
+        # WinRT's scanner detail type is used only for its bluetooth_address;
+        # no fabricated advertisement is consumed by the GATT client.
+        details = RawAdvData(None, SimpleNamespace(bluetooth_address=mac_int))
+        return BLEDevice(address, "QCY H3S (Windows cache)", details)
+    except (ImportError, ValueError):
+        return address
 
 # Serviços secundários que o QCY H3S anuncia quando já pareado/conectado
 QCY_SECONDARY_SERVICES = ("0000fee8-0000-1000-8000-00805f9b34fb",)
@@ -941,58 +989,18 @@ def _resolve_name(name: str, service_uuids: list) -> str:
     return ""
 
 
-import subprocess
-
-
-def _paired_qcy_addresses() -> list[str]:
-    """Tenta obter endereços MAC de dispositivos QCY pareados via PowerShell.
-
-    Retorna lista de endereços no formato XX:XX:XX:XX:XX:XX. Usado para
-    detectar fones já pareados que não estão advertising no momento.
-    """
-    out = []
-    try:
-        cmd = [
-            "powershell", "-NoProfile", "-Command",
-            "Get-PnpDevice -Class Bluetooth | "
-            "Where-Object { $_.FriendlyName -match 'QCY' } | "
-            "Select-Object -ExpandProperty InstanceId",
-        ]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        for line in r.stdout.splitlines():
-            line = line.strip()
-            # InstanceId formato: BTHENUM\\DEV_84AC6005552C\\...
-            import re
-            m = re.search(r"DEV_([0-9A-Fa-f]{12})", line)
-            if m:
-                hexaddr = m.group(1)
-                addr = ":".join(hexaddr[i:i+2] for i in range(0, 12, 2))
-                if addr not in out:
-                    out.append(addr)
-    except Exception:
-        pass
-    return out
-
-
 async def scan_including_paired(timeout: float = 6.0) -> list:
     """Scan BLE + tenta incluir fones QCY já pareados que não advertising.
 
-    Para cada endereço pareado não encontrado no scan, tenta
-    find_device_by_address; se o OS conseguir resolvê-lo, adiciona à lista
-    (com nome 'QCY H3S (pareado)'). Isso cobre o caso 'já conectado'.
+    Windows pode não anunciar dispositivos já pareados/conectados. O MAC
+    clássico listado pelo PnP não é o endereço BLE GATT, então usamos o
+    endereço BLE validado do H3S como fallback de conexão (não como prova de
+    que o dispositivo está ligado; a tentativa BLE confirma isso).
     """
     items = await scan(timeout=timeout, only_qcy=True)
-    found_addrs = {a for a, _, _ in items}
-    for addr in _paired_qcy_addresses():
-        if addr in found_addrs:
-            continue
-        try:
-            dev = await BleakScanner.find_device_by_address(addr, timeout=3.0)
-        except Exception:
-            dev = None
-        if dev is not None:
-            items.append((addr, "QCY H3S (pareado)", None))
-            found_addrs.add(addr)
+    found_addrs = {a.casefold() for a, _, _ in items}
+    if QCY_H3S_BLE_ADDRESS.casefold() not in found_addrs:
+        items.append((QCY_H3S_BLE_ADDRESS, "QCY H3S (endereço BLE conhecido)", None))
     items.sort(key=lambda x: x[2] if x[2] is not None else -999, reverse=True)
     return items
 
@@ -1007,6 +1015,7 @@ async def scan(timeout: float = 6.0, only_qcy: bool = True) -> list:
     result = await BleakScanner.discover(timeout=timeout, return_adv=True)
     items = []
     for dev, adv in result.values():
+        _BLE_DEVICE_CACHE[dev.address.casefold()] = dev
         name = dev.name or adv.local_name or ""
         svcs = list(adv.service_uuids or [])
         if only_qcy and not _is_qcy_device(name, svcs):

@@ -56,7 +56,8 @@ class ScanDialog(QDialog):
             return
         self._status.setText(f"{len(devices)} dispositivo(s) encontrado(s).")
         for addr, name, rssi in devices:
-            label = f"{name or '(sem nome)'}  [{addr}]  {rssi} dBm"
+            signal = f"{rssi} dBm" if rssi is not None else "conexão ativa/pareado"
+            label = f"{name or '(sem nome)'}  [{addr}]  {signal}"
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, (addr, name))
             self._list.addItem(item)
@@ -135,10 +136,12 @@ class MainWindow(QMainWindow):
         self._worker.connected.connect(self._on_connected)
         self._worker.disconnected.connect(self._on_disconnected)
         self._worker.error.connect(self._on_error)
+        self._worker.status.connect(self._on_status)
         self._worker.battery_updated.connect(self._on_battery)
         self._worker.mode_updated.connect(self._on_mode_updated)
         self._worker.eq_updated.connect(self._on_eq_updated)
         self._worker.game_mode_updated.connect(self._on_game_mode_updated)
+        self._worker.audio_mode_updated.connect(self._on_audio_mode_updated)
 
         self._scan_dialog: ScanDialog | None = None
         self._mode_buttons: list[QPushButton] = []
@@ -294,7 +297,9 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _set_connected(self, connected: bool):
-        self._scan_btn.setEnabled(not connected)
+        # Escanear continua disponível: com link ativo, o diálogo prioriza a
+        # conexão existente e não interrompe o BLE com uma nova descoberta.
+        self._scan_btn.setEnabled(True)
         self._disconnect_btn.setEnabled(connected)
         self._game_mode_btn.setEnabled(connected)
         for btn in self._mode_buttons:
@@ -355,6 +360,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Erro: {msg}")
         QMessageBox.warning(self, "Erro", msg)
 
+    def _on_status(self, msg: str):
+        self.statusBar().showMessage(msg, 8000)
+
     def _on_battery(self, pct: int):
         self._battery_label.setText(f"🔋 {pct}%")
 
@@ -369,14 +377,17 @@ class MainWindow(QMainWindow):
     def _on_game_mode_updated(self, enabled: bool):
         self._game_mode_btn.setChecked(enabled)
 
+    def _on_audio_mode_updated(self, idx: int):
+        for i, btn in enumerate(self._audio_mode_buttons):
+            btn.setChecked(i == idx)
+
     # ------------------------------------------------------------------
     # User actions
     # ------------------------------------------------------------------
 
     def _on_mode_changed(self, idx: int):
-        self._set_mode_active(idx)
         self._worker.set_mode(MODE_BYTES[idx])
-        self.statusBar().showMessage(f"Modo: {MODE_LABELS[idx]}")
+        self.statusBar().showMessage(f"Enviando modo: {MODE_LABELS[idx]}…")
 
     def _on_preset_btn(self, idx: int):
         self._active_preset_idx = idx
