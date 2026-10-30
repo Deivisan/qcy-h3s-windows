@@ -1,265 +1,382 @@
-"""MCP Server for QCY H3S headphone control via BLE (Jieli RCSP)."""
+"""MCP Server for QCY H3S headphone control via BLE (Jieli RCSP).
+
+Auditoria de risco completa em `docs/COMANDOS-DESTRUTIVOS.md`.
+
+Regras que este servidor aplica (não são sugestões):
+
+* **Um comando por vez**, globalmente (`_lock`). Antes disso duas chamadas
+  simultâneas abriam dois `BleakClient` e corrompiam o contador `sn` do RCSP.
+* **Comandos destrutivos exigem confirmação explícita** no campo `confirm`,
+  com o nome da tool em maiúsculas. Sem isso a chamada é recusada.
+* **Quarentena depois de destrutivo** (`COOLDOWN`): o H3S reinicia em
+  `set_ldac`, e mandar o próximo comando em cima volta erro de conexão.
+* A lista de tools é um dict, então não existe mais tool registrada em
+  duplicidade (`set_ldac`, `set_sleep_mode` e `set_touch_tone` apareciam duas
+  vezes na versão anterior).
+"""
 import asyncio
-import sys
+import datetime
 import os
+import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import TextContent, Tool
 
 from bleak import BleakScanner
+
 import h3s_device
 
 BLE_ADDR = "84:AC:60:F8:A6:BF"
+SCAN_TIMEOUT = 6.0
+
+READ = "read"
+WRITE = "write"
+DESTRUCTIVE = "destructive"
+
+#: Quarentena em segundos depois de um comando destrutivo.
+#: O fone reinicia de verdade nesses casos (medido: `set_ldac(False)` derruba
+#: o A2DP e o fone volta ~8-12 s depois).
+COOLDOWN = {
+    "set_ldac": 12.0,
+    "factory_reset": 15.0,
+    "clear_pair": 12.0,
+    "reset_default": 8.0,
+}
+
 _device = None
-_loop = None
+_lock = asyncio.Lock()
+_cooldown_until = 0.0
+_last_destructive: str | None = None
 
 server = Server("qcy-h3s")
 
 
-async def get_device():
+def _text(s: str) -> list[TextContent]:
+    return [TextContent(type="text", text=s)]
+
+
+async def _connect():
+    """Conecta (ou reaproveita) o cliente BLE."""
     global _device
-    if _device is None or not _device.is_connected:
-        devices = await BleakScanner.discover(timeout=10.0)
-        target = None
-        for d in devices:
-            if d.address.upper().replace(":", "") == "84AC60F8A6BF":
-                target = d.address
-                break
+    if _device is not None and _device.is_connected:
+        return _device
+
+    # 1) tenta direto no endereço fixo
+    dev = h3s_device.H3SDevice(BLE_ADDR)
+    try:
+        await dev.connect()
+    except Exception:
+        # 2) fallback: varre e confirma que o endereço realmente está no ar
+        found = await BleakScanner.discover(timeout=SCAN_TIMEOUT)
+        target = next(
+            (d.address for d in found
+             if d.address.upper().replace(":", "") == BLE_ADDR.replace(":", "")),
+            None,
+        )
         if not target:
-            raise RuntimeError("H3S-APP not found. Is the headphone on and nearby?")
-        _device = h3s_device.H3SDevice(target)
-        await _device.connect()
-        await _device.notify_communication_way(way=0, reconnect=0)
-        await asyncio.sleep(0.3)
-    return _device
+            raise RuntimeError(
+                "H3S-APP não encontrado no scan BLE. Fone ligado e perto? "
+                "(se o scan BLE voltar 0 dispositivos, o rádio do Windows travou)"
+            )
+        dev = h3s_device.H3SDevice(target)
+        await dev.connect()
+
+    await dev.notify_communication_way(way=0, reconnect=0)
+    await asyncio.sleep(0.3)
+    _device = dev
+    return dev
+
+
+# ── handlers ────────────────────────────────────────────────────────────────
+
+async def h_get_battery(dev, a):        return str(await dev.get_battery())
+async def h_get_mode(dev, a):           return f"Mode index: {await dev.get_mode()}"
+async def h_get_game_mode(dev, a):      return f"Game mode: {await dev.get_work_mode()}"
+async def h_get_eq(dev, a):             return f"EQ: {await dev.get_eq()}"
+async def h_get_device_info(dev, a):    return str(await dev.get_device_info())
+async def h_get_wear_status(dev, a):    return str(await dev.get_wear_status())
+async def h_get_hearing_safety(dev, a): return str(await dev.get_hearing_safety())
+async def h_get_wind_noise(dev, a):     return str(await dev.get_wind_noise())
+async def h_get_spatial_audio(dev, a):  return str(await dev.get_spatial_audio())
+async def h_get_spatial_sound(dev, a):  return str(await dev.get_space_sound())
+async def h_get_ai_anc(dev, a):         return str(await dev.get_ai_anc())
+async def h_get_focus_mode(dev, a):     return str(await dev.get_focus_mode())
+async def h_get_privacy_mode(dev, a):   return str(await dev.get_privacy_mode())
+async def h_get_env_adaptation(dev, a): return str(await dev.get_env_adaptation())
+async def h_get_adapt_volume(dev, a):   return str(await dev.get_adapt_volume())
+
+
+async def h_set_anc_mode(dev, a):
+    idx = a["mode_index"]
+    if not 0 <= idx < len(h3s_device.ANCMode.ALL):
+        raise ValueError(f"mode_index fora de 0..{len(h3s_device.ANCMode.ALL) - 1}")
+    await dev.set_mode(h3s_device.ANCMode.ALL[idx])
+    return f"ANC -> {idx} ({h3s_device.ANCMode.NAMES[idx]})"
+
+
+async def h_set_game_mode(dev, a):
+    await dev.set_game_mode(a["enabled"])
+    return f"Game mode {'on' if a['enabled'] else 'off'}"
+
+
+async def h_set_eq(dev, a):
+    await dev.set_eq(a["offsets"], a.get("preset_id", 0))
+    return f"EQ set: {a['offsets']} preset={a.get('preset_id', 0)}"
+
+
+async def h_set_volume(dev, a):
+    await dev.set_volume(a["left"], a["right"])
+    return f"Volume L={a['left']} R={a['right']}"
+
+
+async def h_music_control(dev, a):
+    await dev.music_control(a["action"])
+    return f"Music action {a['action']} sent"
+
+
+async def h_find_earphones(dev, a):
+    await dev.find_earphones()
+    return "Find earphones triggered (bipe alto — cuidado com o volume)"
+
+
+async def h_play_tone(dev, a):
+    await dev.play_tone(a["tone_id"])
+    return f"Tone {a['tone_id']} played"
+
+
+async def h_take_photo(dev, a):
+    await dev.take_photo()
+    return "Photo shutter triggered"
+
+
+async def h_sync_time(dev, a):
+    now = datetime.datetime.now()
+    await dev.sync_time(now.year % 100, now.month, now.day,
+                        now.hour, now.minute, now.second, now.isoweekday())
+    return "Time synced"
+
+
+async def h_set_ldac(dev, a):
+    await dev.set_ldac(a["enabled"])
+    return (f"LDAC {'on' if a['enabled'] else 'off'} — o fone reinicia. "
+            f"Quarentena de {COOLDOWN['set_ldac']:.0f}s aplicada.")
+
+
+async def h_reset_default(dev, a):
+    await dev.reset_default()
+    return "Reset to default enviado — fone reinicia, configurações voltam ao padrão."
+
+
+async def h_clear_pair(dev, a):
+    await dev.clear_pair()
+    return "Registros de pareamento apagados — será preciso parear de novo."
+
+
+async def h_factory_reset(dev, a):
+    await dev.factory_reset()
+    return "Factory reset enviado — fone volta ao estado de fábrica."
+
+
+def _bool_setter(method: str, label: str):
+    async def handler(dev, a):
+        await getattr(dev, method)(a["enabled"])
+        return f"{label} {'on' if a['enabled'] else 'off'}"
+    return handler
+
+
+def _int_setter(method: str, arg: str, label: str):
+    async def handler(dev, a):
+        await getattr(dev, method)(a[arg])
+        return f"{label} set to {a[arg]}"
+    return handler
+
+
+# ── registro ────────────────────────────────────────────────────────────────
+
+def _b(name, desc, risk, handler):
+    return (name, dict(desc=desc, risk=risk, handler=handler,
+                       schema={"type": "object", "properties": {}}))
+
+
+def _b1(name, desc, risk, handler, prop, typ):
+    return (name, dict(desc=desc, risk=risk, handler=handler,
+                       schema={"type": "object",
+                               "properties": {prop: {"type": typ}},
+                               "required": [prop]}))
+
+
+def _b2(name, desc, risk, handler, props):
+    return (name, dict(desc=desc, risk=risk, handler=handler,
+                       schema={"type": "object",
+                               "properties": {p: {"type": t} for p, t in props},
+                               "required": [p for p, _ in props]}))
+
+
+TOOLS: dict[str, dict] = dict([
+    _b("connect", "Connect to QCY H3S via BLE", WRITE,
+       lambda dev, a: _done("Connected")),
+    _b("disconnect", "Disconnect from QCY H3S", WRITE,
+       lambda dev, a: _done("Disconnected")),
+
+    # leitura
+    _b("get_battery", "Battery level", READ, h_get_battery),
+    _b("get_mode", "Current ANC mode index (0=off,1=transparency,2-6=levels,7=adaptive)", READ, h_get_mode),
+    _b("get_game_mode", "Game mode state", READ, h_get_game_mode),
+    _b("get_eq", "Current EQ, 10 bands", READ, h_get_eq),
+    _b("get_device_info", "Device info", READ, h_get_device_info),
+    _b("get_wear_status", "Wear detection status", READ, h_get_wear_status),
+    _b("get_hearing_safety", "Hearing safety data", READ, h_get_hearing_safety),
+    _b("get_wind_noise", "Wind noise reduction state", READ, h_get_wind_noise),
+    _b("get_spatial_audio", "Spatial audio state", READ, h_get_spatial_audio),
+    _b("get_spatial_sound", "Spatial sound state", READ, h_get_spatial_sound),
+    _b("get_ai_anc", "AI ANC state", READ, h_get_ai_anc),
+    _b("get_focus_mode", "Focus mode state", READ, h_get_focus_mode),
+    _b("get_privacy_mode", "Privacy mode state", READ, h_get_privacy_mode),
+    _b("get_env_adaptation", "Environment adaptation state", READ, h_get_env_adaptation),
+    _b("get_adapt_volume", "Adaptive volume state", READ, h_get_adapt_volume),
+
+    # escrita reversível
+    _b1("set_anc_mode", "Set ANC mode index (0=off,1=transparency,2-6=levels,7=adaptive)",
+        WRITE, h_set_anc_mode, "mode_index", "integer"),
+    _b1("set_game_mode", "Enable/disable game mode (low latency)", WRITE,
+        h_set_game_mode, "enabled", "boolean"),
+    _b2("set_volume", "Set volume L/R (clamped 0-100)", WRITE, h_set_volume,
+        [("left", "integer"), ("right", "integer")]),
+    _b1("set_balance", "Set L/R balance (clamped 0-255)", WRITE,
+        _int_setter("set_balance", "balance", "Balance"), "balance", "integer"),
+    _b1("set_touch_tone_volume", "Set tone/notification volume (clamped 0-100)", WRITE,
+        _int_setter("set_tone_volume", "volume", "Tone volume"), "volume", "integer"),
+    _b1("set_in_ear_sensitivity", "Set in-ear sensitivity (clamped 0-255)", WRITE,
+        _int_setter("set_inear_sensitivity", "sensitivity", "In-ear sensitivity"),
+        "sensitivity", "integer"),
+    _b1("set_spatial_audio", "Enable/disable spatial audio", WRITE,
+        _bool_setter("set_spatial_audio", "Spatial audio"), "enabled", "boolean"),
+    _b1("set_spatial_sound", "Enable/disable spatial sound", WRITE,
+        _bool_setter("set_space_sound", "Spatial sound"), "enabled", "boolean"),
+    _b1("set_wind_noise", "Enable/disable wind noise reduction", WRITE,
+        _bool_setter("set_wind_noise", "Wind noise"), "enabled", "boolean"),
+    _b1("set_wear_detection", "Enable/disable wear detection", WRITE,
+        _bool_setter("set_wear_config", "Wear detection"), "enabled", "boolean"),
+    _b1("set_touch_tone", "Enable/disable touch tone", WRITE,
+        _bool_setter("set_touch_tone", "Touch tone"), "enabled", "boolean"),
+    _b1("set_ai_anc", "Enable/disable AI ANC", WRITE,
+        _bool_setter("set_ai_anc", "AI ANC"), "enabled", "boolean"),
+    _b1("set_sleep_mode", "Enable/disable sleep mode", WRITE,
+        _bool_setter("set_sleep_mode", "Sleep mode"), "enabled", "boolean"),
+    _b1("set_focus_mode", "Enable/disable focus mode", WRITE,
+        _bool_setter("set_focus_mode", "Focus mode"), "enabled", "boolean"),
+    _b1("set_privacy_mode", "Enable/disable privacy mode", WRITE,
+        _bool_setter("set_privacy_mode", "Privacy mode"), "enabled", "boolean"),
+    _b1("set_adapt_volume", "Enable/disable adaptive volume", WRITE,
+        _bool_setter("set_adapt_volume", "Adapt volume"), "enabled", "boolean"),
+    _b1("set_env_adaptation", "Enable/disable environment adaptation", WRITE,
+        _bool_setter("set_env_adaptation", "Env adaptation"), "enabled", "boolean"),
+    _b1("set_led_mode", "Enable/disable LED", WRITE,
+        _bool_setter("set_led_mode", "LED"), "enabled", "boolean"),
+    _b1("set_led_switch", "Enable/disable LED switch", WRITE,
+        _bool_setter("set_led_switch", "LED switch"), "enabled", "boolean"),
+    _b1("set_light", "Enable/disable flashlight", WRITE,
+        _bool_setter("set_light", "Light"), "enabled", "boolean"),
+    _b2("set_button_func", "Remap touch button", WRITE,
+        lambda dev, a: _todo(dev.set_button_func(a["key_id"], a["func_id"]),
+                             f"Button {a['key_id']} -> {a['func_id']}"),
+        [("key_id", "integer"), ("func_id", "integer")]),
+    _b1("music_control", "Music control on the paired phone: 1=play,2=pause,3=prev,4=next",
+        WRITE, h_music_control, "action", "integer"),
+    _b("take_photo", "Remote camera shutter on the paired phone", WRITE, h_take_photo),
+    _b("find_earphones", "Play a loud locate sound on the headphone", WRITE, h_find_earphones),
+    _b1("play_tone", "Play a test tone on the headphone", WRITE,
+        h_play_tone, "tone_id", "integer"),
+    _b2("set_eq", "Set EQ. offsets: exactly 10 ints (1/100 dB, -1200..1200); "
+                  "preset_id: 0=custom..6=Classic", WRITE, h_set_eq,
+        [("offsets", "array"), ("preset_id", "integer")]),
+    _b("sync_time", "Sync the device clock from the PC", WRITE, h_sync_time),
+
+    # destrutivos
+    _b1("set_ldac", "DESTRUCTIVE: toggle LDAC. The headphone RESTARTS and drops "
+                    "A2DP. Requires confirm='SET_LDAC'",
+        DESTRUCTIVE, h_set_ldac, "enabled", "boolean"),
+    _b("reset_default", "DESTRUCTIVE: reset all settings to defaults. Requires "
+                        "confirm='RESET_DEFAULT'", DESTRUCTIVE, h_reset_default),
+    _b("clear_pair", "DESTRUCTIVE: erase pairing records. Requires "
+                     "confirm='CLEAR_PAIR'", DESTRUCTIVE, h_clear_pair),
+    _b("factory_reset", "DESTRUCTIVE: factory reset. Requires "
+                        "confirm='FACTORY_RESET'", DESTRUCTIVE, h_factory_reset),
+])
+
+
+async def _done(msg):
+    return msg
+
+
+async def _todo(awaitable, msg):
+    await awaitable
+    return msg
 
 
 @server.list_tools()
 async def list_tools():
-    return [
-        Tool(name="connect", description="Connect to QCY H3S via BLE", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="disconnect", description="Disconnect from QCY H3S", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="get_battery", description="Get battery level (0-100)", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="get_mode", description="Get current ANC mode index", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="set_anc_mode", description="Set ANC mode. mode: 0=off,1=transparency,2-6=ANC levels,7=adaptive", inputSchema={"type": "object", "properties": {"mode_index": {"type": "integer"}}, "required": ["mode_index"]}),
-        Tool(name="set_game_mode", description="Enable/disable game mode (low latency)", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="get_game_mode", description="Get game mode state", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="get_eq", description="Get current EQ (10 bands)", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="set_eq", description="Set EQ. offsets: list of 10 ints (1/100 dB), preset_id: 0=custom,1=rock,2=pop,3=classical,4=jazz,5=electronic,6=vocal", inputSchema={"type": "object", "properties": {"offsets": {"type": "array", "items": {"type": "integer"}}, "preset_id": {"type": "integer"}}, "required": ["offsets"]}),
-        Tool(name="set_volume", description="Set volume L/R (0-100)", inputSchema={"type": "object", "properties": {"left": {"type": "integer"}, "right": {"type": "integer"}}, "required": ["left", "right"]}),
-        Tool(name="music_control", description="Music control: 1=play, 2=pause, 3=prev, 4=next", inputSchema={"type": "object", "properties": {"action": {"type": "integer"}}, "required": ["action"]}),
-        Tool(name="set_ldac", description="Enable/disable LDAC codec", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="find_earphones", description="Play sound to find earphones", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="set_spatial_audio", description="Enable/disable spatial audio", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_wind_noise", description="Enable/disable wind noise reduction", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_wear_detection", description="Enable/disable wear detection", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_touch_tone", description="Enable/disable touch tone", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_ai_anc", description="Enable/disable AI ANC", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_sleep_mode", description="Enable/disable sleep mode", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_focus_mode", description="Enable/disable focus mode", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_privacy_mode", description="Enable/disable privacy mode", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_spatial_sound", description="Enable/disable spatial sound", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_adapt_volume", description="Enable/disable adaptive volume", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_env_adaptation", description="Enable/disable environment adaptation", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_led_mode", description="Enable/disable LED", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_led_switch", description="Enable/disable LED switch", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_touch_tone_volume", description="Set tone/notification volume (0-100)", inputSchema={"type": "object", "properties": {"volume": {"type": "integer"}}, "required": ["volume"]}),
-        Tool(name="set_balance", description="Set L/R balance (0-255)", inputSchema={"type": "object", "properties": {"balance": {"type": "integer"}}, "required": ["balance"]}),
-        Tool(name="set_button_func", description="Remap touch button", inputSchema={"type": "object", "properties": {"key_id": {"type": "integer"}, "func_id": {"type": "integer"}}, "required": ["key_id", "func_id"]}),
-        Tool(name="set_in_ear_sensitivity", description="Set in-ear sensitivity", inputSchema={"type": "object", "properties": {"sensitivity": {"type": "integer"}}, "required": ["sensitivity"]}),
-        Tool(name="get_device_info", description="Get device info", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="get_wear_status", description="Get wear detection status", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="get_hearing_safety", description="Get hearing safety data", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="get_wind_noise", description="Get wind noise state", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="get_spatial_audio", description="Get spatial audio state", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="get_spatial_sound", description="Get spatial sound state", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="get_ai_anc", description="Get AI ANC state", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="get_focus_mode", description="Get focus mode state", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="get_privacy_mode", description="Get privacy mode state", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="get_env_adaptation", description="Get environment adaptation state", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="get_adapt_volume", description="Get adaptive volume state", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="reset_default", description="Reset to default settings", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="clear_pair", description="Clear pairing records", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="factory_reset", description="Factory reset (CAUTION)", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="set_sleep_mode", description="Enable/disable sleep mode", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_touch_tone", description="Enable/disable touch tone", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="sync_time", description="Sync device clock", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="play_tone", description="Play test tone", inputSchema={"type": "object", "properties": {"tone_id": {"type": "integer"}}, "required": ["tone_id"]}),
-        Tool(name="take_photo", description="Remote camera shutter", inputSchema={"type": "object", "properties": {}}),
-        Tool(name="set_light", description="Enable/disable flashlight", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-        Tool(name="set_ldac", description="Enable/disable LDAC (may restart headphone)", inputSchema={"type": "object", "properties": {"enabled": {"type": "boolean"}}, "required": ["enabled"]}),
-    ]
+    out = []
+    for name, spec in TOOLS.items():
+        schema = dict(spec["schema"])
+        if spec["risk"] == DESTRUCTIVE:
+            props = dict(schema.get("properties", {}))
+            props["confirm"] = {"type": "string"}
+            schema = {**schema, "properties": props,
+                      "required": list(schema.get("required", [])) + ["confirm"]}
+        out.append(Tool(name=name, description=spec["desc"], inputSchema=schema))
+    return out
 
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict):
-    global _device
-    try:
-        dev = await get_device()
-        result = None
+    global _device, _cooldown_until, _last_destructive
 
-        if name == "connect":
-            result = "Connected"
-        elif name == "disconnect":
-            if _device:
-                await _device.disconnect()
+    spec = TOOLS.get(name)
+    if spec is None:
+        return _text(f"Unknown tool: {name}")
+
+    arguments = arguments or {}
+
+    if spec["risk"] == DESTRUCTIVE:
+        expected = name.upper()
+        if arguments.get("confirm") != expected:
+            return _text(
+                f"REFUSED: '{name}' é destrutivo. Reenvie com confirm='{expected}'. "
+                f"Ver docs/COMANDOS-DESTRUTIVOS.md."
+            )
+
+    async with _lock:
+        wait = _cooldown_until - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(wait)
+
+        try:
+            if name == "disconnect":
+                if _device:
+                    await _device.disconnect()
                 _device = None
-            result = "Disconnected"
-        elif name == "get_battery":
-            pkt = await dev.get_battery()
-            result = str(pkt)
-        elif name == "get_mode":
-            m = await dev.get_mode()
-            result = f"Mode index: {m}"
-        elif name == "set_anc_mode":
-            mode_bytes = h3s_device.ANCMode.ALL[arguments["mode_index"]] if arguments["mode_index"] < len(h3s_device.ANCMode.ALL) else None
-            if mode_bytes:
-                await dev.set_mode(mode_bytes)
-                result = f"Set mode {arguments['mode_index']}"
-            else:
-                result = "Invalid mode index"
-        elif name == "set_game_mode":
-            await dev.set_game_mode(arguments["enabled"])
-            result = f"Game mode {'on' if arguments['enabled'] else 'off'}"
-        elif name == "get_game_mode":
-            gm = await dev.get_work_mode()
-            result = f"Game mode: {gm}"
-        elif name == "get_eq":
-            eq = await dev.get_eq()
-            result = f"EQ: {eq}"
-        elif name == "set_eq":
-            offsets = arguments["offsets"]
-            preset_id = arguments.get("preset_id", 0)
-            await dev.set_eq(offsets, preset_id)
-            result = f"EQ set: {offsets} preset={preset_id}"
-        elif name == "set_volume":
-            await dev.set_volume(arguments["left"], arguments["right"])
-            result = f"Volume set L={arguments['left']} R={arguments['right']}"
-        elif name == "music_control":
-            await dev.music_control(arguments["action"])
-            result = f"Music action {arguments['action']} sent"
-        elif name == "set_ldac":
-            await dev.set_ldac(arguments["enabled"])
-            result = f"LDAC {'on' if arguments['enabled'] else 'off'}"
-        elif name == "find_earphones":
-            await dev.find_earphones()
-            result = "Find earphones triggered"
-        elif name == "set_spatial_audio":
-            await dev.set_spatial_audio(arguments["enabled"])
-            result = f"Spatial audio {'on' if arguments['enabled'] else 'off'}"
-        elif name == "set_wind_noise":
-            await dev.set_wind_noise(arguments["enabled"])
-            result = f"Wind noise {'on' if arguments['enabled'] else 'off'}"
-        elif name == "set_wear_detection":
-            await dev.set_wear_config(arguments["enabled"])
-            result = f"Wear detection {'on' if arguments['enabled'] else 'off'}"
-        elif name == "set_touch_tone":
-            await dev.set_touch_tone(arguments["enabled"])
-            result = f"Touch tone {'on' if arguments['enabled'] else 'off'}"
-        elif name == "set_ai_anc":
-            await dev.set_ai_anc(arguments["enabled"])
-            result = f"AI ANC {'on' if arguments['enabled'] else 'off'}"
-        elif name == "set_sleep_mode":
-            await dev.set_sleep_mode(arguments["enabled"])
-            result = f"Sleep mode {'on' if arguments['enabled'] else 'off'}"
-        elif name == "set_focus_mode":
-            await dev.set_focus_mode(arguments["enabled"])
-            result = f"Focus mode {'on' if arguments['enabled'] else 'off'}"
-        elif name == "set_privacy_mode":
-            await dev.set_privacy_mode(arguments["enabled"])
-            result = f"Privacy mode {'on' if arguments['enabled'] else 'off'}"
-        elif name == "set_spatial_sound":
-            await dev.set_space_sound(arguments["enabled"])
-            result = f"Spatial sound {'on' if arguments['enabled'] else 'off'}"
-        elif name == "set_adapt_volume":
-            await dev.set_adapt_volume(arguments["enabled"])
-            result = f"Adapt volume {'on' if arguments['enabled'] else 'off'}"
-        elif name == "set_env_adaptation":
-            await dev.set_env_adaptation(arguments["enabled"])
-            result = f"Env adaptation {'on' if arguments['enabled'] else 'off'}"
-        elif name == "set_led_mode":
-            await dev.set_led_mode(arguments["enabled"])
-            result = f"LED {'on' if arguments['enabled'] else 'off'}"
-        elif name == "set_led_switch":
-            await dev.set_led_switch(arguments["enabled"])
-            result = f"LED switch {'on' if arguments['enabled'] else 'off'}"
-        elif name == "set_touch_tone_volume":
-            await dev.set_tone_volume(arguments["volume"])
-            result = f"Tone volume set to {arguments['volume']}"
-        elif name == "set_balance":
-            await dev.set_balance(arguments["balance"])
-            result = f"Balance set to {arguments['balance']}"
-        elif name == "set_button_func":
-            await dev.set_button_func(arguments["key_id"], arguments["func_id"])
-            result = f"Button {arguments['key_id']} remapped to {arguments['func_id']}"
-        elif name == "set_in_ear_sensitivity":
-            await dev.set_inear_sensitivity(arguments["sensitivity"])
-            result = f"In-ear sensitivity set to {arguments['sensitivity']}"
-        elif name == "get_device_info":
-            pkt = await dev.get_device_info()
-            result = str(pkt)
-        elif name == "get_wear_status":
-            pkt = await dev.get_wear_status()
-            result = str(pkt)
-        elif name == "get_hearing_safety":
-            pkt = await dev.get_hearing_safety()
-            result = str(pkt)
-        elif name == "get_wind_noise":
-            pkt = await dev.get_wind_noise()
-            result = str(pkt)
-        elif name == "get_spatial_audio":
-            pkt = await dev.get_spatial_audio()
-            result = str(pkt)
-        elif name == "get_spatial_sound":
-            pkt = await dev.get_space_sound()
-            result = str(pkt)
-        elif name == "get_ai_anc":
-            pkt = await dev.get_ai_anc()
-            result = str(pkt)
-        elif name == "get_focus_mode":
-            pkt = await dev.get_focus_mode()
-            result = str(pkt)
-        elif name == "get_privacy_mode":
-            pkt = await dev.get_privacy_mode()
-            result = str(pkt)
-        elif name == "get_env_adaptation":
-            pkt = await dev.get_env_adaptation()
-            result = str(pkt)
-        elif name == "get_adapt_volume":
-            pkt = await dev.get_adapt_volume()
-            result = str(pkt)
-        elif name == "reset_default":
-            await dev.reset_default()
-            result = "Reset to default done"
-        elif name == "clear_pair":
-            await dev.clear_pair()
-            result = "Pairing cleared"
-        elif name == "factory_reset":
-            await dev.factory_reset()
-            result = "Factory reset done"
-        elif name == "sync_time":
-            import datetime
-            now = datetime.datetime.now()
-            await dev.sync_time(now.year, now.month, now.day, now.hour, now.minute, now.second)
-            result = "Time synced"
-        elif name == "play_tone":
-            await dev.play_tone(arguments["tone_id"])
-            result = f"Tone {arguments['tone_id']} played"
-        elif name == "take_photo":
-            await dev.take_photo()
-            result = "Photo shutter triggered"
-        elif name == "set_light":
-            await dev.set_light(arguments["enabled"])
-            result = f"Light {'on' if arguments['enabled'] else 'off'}"
-        else:
-            result = f"Unknown tool: {name}"
+                return _text("Disconnected")
 
-        return [TextContent(type="text", text=result)]
-    except Exception as e:
-        return [TextContent(type="text", text=f"Error: {e}")]
+            dev = await _connect()
+            result = await spec["handler"](dev, arguments)
+
+            if spec["risk"] == DESTRUCTIVE:
+                _last_destructive = name
+                try:
+                    await dev.disconnect()
+                except Exception:
+                    pass
+                _device = None
+                _cooldown_until = time.monotonic() + COOLDOWN.get(name, 10.0)
+
+            return _text(result)
+        except Exception as e:
+            return _text(f"Error: {e}")
 
 
 async def main():
