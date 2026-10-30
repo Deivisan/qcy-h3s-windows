@@ -342,8 +342,27 @@ class H3SDevice:
         return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x62])))
 
     async def set_wear_config(self, enabled: bool) -> Packet | None:
-        """Enable/disable wear detection (cmd 0x2C)."""
-        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x2C, 0x01, 0x01 if enabled else 0x00])))
+        """Enable/disable wear detection (cmd 0x2C).
+
+        Formato correto (Quicky): [0x2C, 0x03, enable, musicIndex, ancIndex]
+        enable: 0x01=on, 0x02=off. musicIndex=0x01 (pausa música ao remover),
+        ancIndex=0x00 (sem mudança de ANC).
+        """
+        val = 0x01 if enabled else 0x02
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x2C, 0x03, val, 0x01, 0x00])))
+
+    async def set_music_mode(self, mode: int) -> Packet | None:
+        """Set audio scene mode (cmd 0x2E). 0=Music, 1=Movie, 2=Game (testar)."""
+        mode = _clamp(mode, 0, 4, "music mode")
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x2E, 0x01, mode])))
+
+    async def set_multipoint(self, enabled: bool) -> Packet | None:
+        """Enable/disable multipoint (dual connection) (cmd 0x24).
+
+        Pode reiniciar o fone; use com cuidado. LDAC deve estar off.
+        """
+        val = 0x01 if enabled else 0x00
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x24, 0x01, val])))
 
     async def get_spatial_audio(self) -> Packet | None:
         """Get spatial audio mode (cmd 0x5B)."""

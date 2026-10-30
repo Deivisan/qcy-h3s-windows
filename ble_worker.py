@@ -69,6 +69,12 @@ class BleWorker(QObject):
     def set_game_mode(self, enabled: bool):
         self._submit(self._do_set_game_mode(enabled))
 
+    def set_music_mode(self, mode: int):
+        self._submit(self._do_set_music_mode(mode))
+
+    def set_multipoint(self, enabled: bool):
+        self._submit(self._do_set_multipoint(enabled))
+
     def find_earphones(self):
         self._submit(self._do_find_earphones())
 
@@ -190,6 +196,26 @@ class BleWorker(QObject):
             await dev.set_game_mode(enabled)
         except Exception as e:
             self.error.emit(f"Erro ao trocar game mode: {e}")
+
+    async def _do_set_music_mode(self, mode: int):
+        dev = self._device
+        if dev is None:
+            self.error.emit("Não conectado.")
+            return
+        try:
+            await dev.set_music_mode(mode)
+        except Exception as e:
+            self.error.emit(f"Erro ao trocar modo de audio: {e}")
+
+    async def _do_set_multipoint(self, enabled: bool):
+        dev = self._device
+        if dev is None:
+            self.error.emit("Não conectado.")
+            return
+        try:
+            await dev.set_multipoint(enabled)
+        except Exception as e:
+            self.error.emit(f"Erro ao trocar multiponto: {e}")
 
     async def _do_find_earphones(self):
         dev = self._device

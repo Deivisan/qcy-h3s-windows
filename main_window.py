@@ -249,6 +249,19 @@ class MainWindow(QMainWindow):
 
         root.addWidget(eq_group)
 
+        # ---- Audio mode group ----
+        audio_group = QGroupBox("Modo de Áudio (Music/Movie/Game)")
+        audio_lay = QHBoxLayout(audio_group)
+        self._audio_mode_buttons: list[QPushButton] = []
+        for i, label in enumerate(["Música", "Filme", "Jogo"]):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setEnabled(False)
+            btn.clicked.connect(lambda _, idx=i: self._on_audio_mode_changed(idx))
+            audio_lay.addWidget(btn)
+            self._audio_mode_buttons.append(btn)
+        root.addWidget(audio_group)
+
         # ---- Features group (H3S-specific) ----
         feat_group = QGroupBox("Recursos H3S")
         feat_lay = QGridLayout(feat_group)
@@ -259,6 +272,7 @@ class MainWindow(QMainWindow):
             ("Detecção de Uso", self._toggle_wear),
             ("Tom de Toque", self._toggle_touch_tone),
             ("ANC com IA", self._toggle_ai_anc),
+            ("Multiponto", self._toggle_multipoint),
         ]
         for i, (label, handler) in enumerate(feat_buttons):
             btn = QPushButton(label)
@@ -290,6 +304,8 @@ class MainWindow(QMainWindow):
         for btn in self._eq_preset_buttons:
             btn.setEnabled(connected)
         for btn in self._feat_buttons:
+            btn.setEnabled(connected)
+        for btn in self._audio_mode_buttons:
             btn.setEnabled(connected)
         if not connected:
             self._device_label.setText("Não conectado")
@@ -434,4 +450,17 @@ class MainWindow(QMainWindow):
         self._worker.set_ai_anc(enabled)
         label = "ativado" if enabled else "desativado"
         self.statusBar().showMessage(f"ANC com IA {label}.")
-        self.statusBar().showMessage(f"EQ aplicado ({EQ_PRESET_NAMES[self._active_preset_idx]}).")
+
+    def _toggle_multipoint(self):
+        btn = self._feat_buttons[6]
+        enabled = not btn.property("active")
+        btn.setProperty("active", enabled)
+        self._worker.set_multipoint(enabled)
+        label = "ativado" if enabled else "desativado"
+        self.statusBar().showMessage(f"Multiponto {label} (pode reiniciar o fone).")
+
+    def _on_audio_mode_changed(self, idx: int):
+        for i, btn in enumerate(self._audio_mode_buttons):
+            btn.setChecked(i == idx)
+        self._worker.set_music_mode(idx)
+        self.statusBar().showMessage(f"Modo de áudio: {['Música','Filme','Jogo'][idx]}")
