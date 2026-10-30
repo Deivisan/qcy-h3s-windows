@@ -8,8 +8,16 @@ from rcsp import AdvType, HEADER, OpCode, Packet, TYPE_COMMAND, hex_str
 
 # ANC/mode command bytes (Custom opCode 255)
 class ANCMode:
-    TRANSPARENCY    = bytes([0x17, 0x03, 0x02, 0x00, 0x00])  # ANC desligado
-    NORMAL          = bytes([0x17, 0x03, 0x03, 0x01, 0x04])  # Transparência (ambiente)
+    # ATENÇÃO: o byte que decide o modo é `params[2]` — ver `from_params()`.
+    #   0x02 = ANC desligado | 0x03 = transparência | 0x01 = ANC por grupo/nível
+    #
+    # Até 29/10/2026 as duas primeiras constantes tinham NOME TROCADO em relação
+    # ao payload (a chamada `TRANSPARENCY` na verdade mandava ANC desligado, e
+    # `NORMAL` mandava transparência). A ordem de `ALL` estava certa, então o
+    # app funcionava; mas o nome mentia e qualquer refactor "arrumando" a ordem
+    # fazia o fone trocar os dois modos. Nomes corrigidos, ordem preservada.
+    ANC_OFF         = bytes([0x17, 0x03, 0x02, 0x00, 0x00])  # ANC desligado
+    TRANSPARENCY    = bytes([0x17, 0x03, 0x03, 0x01, 0x04])  # Transparência (ambiente)
 
     NOISY_LOW       = bytes([0x17, 0x03, 0x01, 0x01, 0x00])  # Ruído baixo
     NOISY_MED       = bytes([0x17, 0x03, 0x01, 0x01, 0x01])  # Ruído médio
@@ -28,10 +36,21 @@ class ANCMode:
     ANTIWIND        = bytes([0x17, 0x03, 0x01, 0x04, 0x00])  # Anti-vento
     ADAPTIVE        = bytes([0x17, 0x03, 0x01, 0x05, 0x00])  # Adaptativo (AI)
 
+    # Alias legado: o nome antigo `NORMAL` significava transparência.
+    NORMAL = TRANSPARENCY
+
+    # Ordem canônica: TEM de casar com a numeração devolvida por `from_params()`.
+    # 0 = ANC desligado, 1 = transparência, 2..6 = níveis de ANC, 7 = adaptativo.
     ALL = [
-        TRANSPARENCY, NORMAL,
+        ANC_OFF, TRANSPARENCY,
         NOISY_LOW, NOISY_MED, NOISY_HIGH, NOISY_MAX, NOISY_ULTRA,
         ADAPTIVE,
+    ]
+
+    NAMES = [
+        "ANC desligado", "Transparência",
+        "ANC baixo", "ANC médio", "ANC alto", "ANC máximo", "ANC ultra",
+        "Adaptativo (AI)",
     ]
 
     @staticmethod
@@ -97,6 +116,17 @@ EQ_PRESET_OFFSETS: dict[int, list[int]] = {
 SERVICE_UUID = "0000a002-0000-1000-8000-00805f9b34fb"
 WRITE_UUID = "00000001-0000-1000-8000-00805f9b34fb"
 NOTIFY_UUID = "00000002-0000-1000-8000-00805f9b34fb"
+
+
+def _clamp(value: int, lo: int, hi: int, name: str) -> int:
+    """Clamp an int to [lo, hi] and refuse non-ints.
+
+    Sem isso, `set_volume(300, 300)` virava `bytes([44, 44])` silenciosamente
+    porque o valor era truncado com `& 0xFF`.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be int, got {type(value).__name__}")
+    return max(lo, min(hi, value))
 
 
 class H3SDevice:
@@ -239,10 +269,15 @@ class H3SDevice:
     async def set_eq(self, db_offsets: list[int], preset_id: int = 0x00) -> Packet | None:
         """Set EQ. db_offsets: 10 values in 1/100-dB (-1200..+1200).
         preset_id: 0x00=custom, 0x01=Default, 0x02=Pop ... 0x06=Classic."""
+        if not isinstance(db_offsets, (list, tuple)):
+            raise TypeError("db_offsets must be a list of 10 ints")
+        if len(db_offsets) != len(EQ_BANDS_FREQS):
+            raise ValueError(f"db_offsets must have {len(EQ_BANDS_FREQS)} values, got {len(db_offsets)}")
+        preset_id = _clamp(preset_id, 0x00, 0x06, "preset_id")
         band_bytes = bytearray()
         for i, freq in enumerate(EQ_BANDS_FREQS):
             ref_gain, q = EQ_BAND_DEFAULTS[freq]
-            db_off = db_offsets[i] if i < len(db_offsets) else 0
+            db_off = _clamp(db_offsets[i], -1200, 1200, f"db_offsets[{i}]")
             band_bytes += freq.to_bytes(2, "little")
             band_bytes += db_off.to_bytes(2, "little", signed=True)
             band_bytes += ref_gain.to_bytes(2, "little")
@@ -385,8 +420,10 @@ class H3SDevice:
         return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x04, 0x01, action])))
 
     async def set_volume(self, left: int, right: int) -> Packet | None:
-        """Set volume L/R (cmd 0x08). 0-100+."""
-        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x08, 0x03, left & 0xFF, right & 0xFF, 0x00])))
+        """Set volume L/R (cmd 0x08). Validado em 0-100."""
+        left = _clamp(left, 0, 100, "left")
+        right = _clamp(right, 0, 100, "right")
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x08, 0x03, left, right, 0x00])))
 
     async def set_music_mode(self, mode: int) -> Packet | None:
         """Set music mode (cmd 0x2E)."""
@@ -431,9 +468,23 @@ class H3SDevice:
     # ── Sync Time ──
 
     async def sync_time(self, year, month, day, hour, minute, second, weekday=1) -> Packet | None:
-        """Sync device clock (cmd 0x3E). weekday: 1=Mon..7=Sun."""
-        params = bytes([0x3E, 0x07, year % 100, month + 1, day, hour, minute, second, 1 << (weekday - 1)])
-        return await self.send(Packet(op_code=OpCode.CUSTOM, params=params))
+        """Sync device clock (cmd 0x3E / CMDID_SYNC_TIME). weekday: 1=Mon..7=Sun.
+
+        ATENÇÃO: até 29/10/2026 isso mandava `month + 1`, o que em dezembro
+        gerava mês 13. O layout do protocolo não está confirmado; assumimos
+        mês 1-based. Marca como NÃO TESTADO em docs/COMANDOS-DESTRUTIVOS.md.
+        """
+        payload = bytes([
+            0x3E, 0x07,
+            _clamp(year, 0, 99, "year"),
+            _clamp(month, 1, 12, "month"),
+            _clamp(day, 1, 31, "day"),
+            _clamp(hour, 0, 23, "hour"),
+            _clamp(minute, 0, 59, "minute"),
+            _clamp(second, 0, 59, "second"),
+            1 << (_clamp(weekday, 1, 7, "weekday") - 1),
+        ])
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=payload))
 
     # ── Alarm ──
 
@@ -494,8 +545,9 @@ class H3SDevice:
     # ── Tone ──
 
     async def set_tone_volume(self, volume: int) -> Packet | None:
-        """Set tone/notification volume (cmd 0x1D)."""
-        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x1D, 0x01, volume & 0xFF])))
+        """Set tone/notification volume (cmd 0x1D). Validado em 0-100."""
+        volume = _clamp(volume, 0, 100, "volume")
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x1D, 0x01, volume])))
 
     async def play_tone(self, tone_id: int) -> Packet | None:
         """Play test tone (cmd 0x3D)."""
@@ -524,14 +576,16 @@ class H3SDevice:
     # ── Balance ──
 
     async def set_balance(self, balance: int) -> Packet | None:
-        """Set L/R balance (cmd 0x16). balance: -100..100 or 0..255."""
-        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x16, 0x01, balance & 0xFF])))
+        """Set L/R balance (cmd 0x16). Validado em 0-255."""
+        balance = _clamp(balance, 0, 255, "balance")
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x16, 0x01, balance])))
 
     # ── In-Ear Sensitivity ──
 
     async def set_inear_sensitivity(self, sensitivity: int) -> Packet | None:
-        """Set in-ear sensitivity (cmd 0x48)."""
-        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x48, 0x01, sensitivity & 0xFF])))
+        """Set in-ear sensitivity (cmd 0x48). Validado em 0-255."""
+        sensitivity = _clamp(sensitivity, 0, 255, "sensitivity")
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x48, 0x01, sensitivity])))
 
     async def get_inear_sensitivity(self) -> Packet | None:
         """Get in-ear sensitivity (cmd 0x48 read)."""
@@ -573,7 +627,9 @@ class H3SDevice:
 
     async def set_button_func(self, key_id: int, func_id: int) -> Packet | None:
         """Remap touch button (cmd 0x2B). key_id: button, func_id: function."""
-        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x2B, 0x02, key_id & 0xFF, func_id & 0xFF])))
+        key_id = _clamp(key_id, 0, 255, "key_id")
+        func_id = _clamp(func_id, 0, 255, "func_id")
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x2B, 0x02, key_id, func_id])))
 
     async def get_button_func(self) -> Packet | None:
         """Get button mapping (cmd 0x2B read)."""
