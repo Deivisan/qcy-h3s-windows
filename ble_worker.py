@@ -20,7 +20,6 @@ class BleWorker(QObject):
     mode_updated     = Signal(int)    # 0-4 (NORMAL/TRANSP/ANC_LOW/MED/HIGH)
     eq_updated       = Signal(list)   # 10 ints (1/100-dB offsets)
     game_mode_updated = Signal(bool)  # True=game mode on
-    audio_mode_updated = Signal(int)   # 0=Music, 1=Movie, 2=Game
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -80,30 +79,6 @@ class BleWorker(QObject):
 
     def set_game_mode(self, enabled: bool):
         self._submit(self._do_set_game_mode(enabled))
-
-    def set_music_mode(self, mode: int):
-        self._submit(self._do_set_music_mode(mode))
-
-    def set_multipoint(self, enabled: bool):
-        self._submit(self._do_set_multipoint(enabled))
-
-    def find_earphones(self):
-        self._submit(self._do_find_earphones())
-
-    def set_spatial_audio(self, enabled: bool):
-        self._submit(self._do_set_spatial_audio(enabled))
-
-    def set_wind_noise(self, enabled: bool):
-        self._submit(self._do_set_wind_noise(enabled))
-
-    def set_wear_config(self, enabled: bool):
-        self._submit(self._do_set_wear_config(enabled))
-
-    def set_touch_tone(self, enabled: bool):
-        self._submit(self._do_set_touch_tone(enabled))
-
-    def set_ai_anc(self, enabled: bool):
-        self._submit(self._do_set_ai_anc(enabled))
 
     def refresh_status(self):
         self._submit(self._do_refresh())
@@ -212,15 +187,6 @@ class BleWorker(QObject):
             if not dev.is_connected:
                 self._on_device_disconnected(dev)
                 return
-        # Audio scene (separate from the low-latency Game Mode toggle).
-        try:
-            audio_mode = await dev.get_music_mode()
-            if audio_mode is not None and 0 <= audio_mode <= 2:
-                self.audio_mode_updated.emit(audio_mode)
-        except Exception:
-            if not dev.is_connected:
-                self._on_device_disconnected(dev)
-                return
 
     async def _do_set_mode(self, mode_bytes: bytes):
         dev = self._device
@@ -236,16 +202,17 @@ class BleWorker(QObject):
                 self._on_device_disconnected(dev)
                 return
             observed = await dev.get_mode()
-            # Este firmware pode ecoar o comando de SET no GET; apenas a
-            # resposta RCSP confirma entrega, não que o fone aplicou o modo.
-            if response is not None and response.status == 0:
-                if requested is not None:
-                    self.mode_updated.emit(requested)
-                    self.status.emit(f"Comando de modo enviado: {ANCMode.NAMES[requested]}.")
+            # GET 0x17 pode ecoar o payload do SET neste firmware. Não pintar
+            # a UI com o valor pedido: só aceitar leitura que corresponda.
+            if observed is not None and requested is not None and observed == requested:
+                self.mode_updated.emit(observed)
+                self.status.emit(f"Modo confirmado pelo fone: {ANCMode.NAMES[observed]}.")
+            elif response is not None and response.status == 0:
+                self.status.emit("Comando ANC entregue, mas o fone não confirmou o modo por leitura.")
             else:
-                self.status.emit("O fone não confirmou o comando de modo; mantendo o estado anterior.")
+                self.status.emit("O fone não confirmou a troca de modo; mantendo o estado anterior.")
             if observed is not None and requested is not None and observed != requested:
-                self.status.emit("O comando foi enviado, mas a leitura do fone não corresponde ao modo pedido.")
+                self.mode_updated.emit(observed)
         except Exception as e:
             if not dev.is_connected:
                 self._on_device_disconnected(dev)
@@ -263,7 +230,19 @@ class BleWorker(QObject):
             return
         try:
             await dev.set_eq(db_offsets, preset_id)
+            await asyncio.sleep(0.25)
+            actual = await dev.get_eq()
+            if actual is not None and actual == db_offsets:
+                self.eq_updated.emit(actual)
+                self.status.emit("Equalizador confirmado pelo fone.")
+            elif actual is not None:
+                self.eq_updated.emit(actual)
+                self.status.emit("O fone não aplicou os valores pedidos; sliders restaurados ao EQ lido.")
+            else:
+                self.status.emit("EQ enviado, mas o fone não devolveu leitura para confirmar.")
         except Exception as e:
+            if not dev.is_connected:
+                self._on_device_disconnected(dev)
             self.error.emit(f"Erro ao aplicar EQ: {e}")
 
     async def _do_set_game_mode(self, enabled: bool):
@@ -283,94 +262,6 @@ class BleWorker(QObject):
             if not dev.is_connected:
                 self._on_device_disconnected(dev)
             self.error.emit(f"Erro ao trocar game mode: {e}")
-
-    async def _do_set_music_mode(self, mode: int):
-        dev = self._device
-        if dev is None:
-            self.error.emit("Não conectado.")
-            return
-        try:
-            await dev.set_music_mode(mode)
-            actual = await dev.get_music_mode()
-            if actual == mode:
-                self.audio_mode_updated.emit(actual)
-                self.status.emit(f"Modo de áudio confirmado pelo fone: {['Música', 'Filme', 'Jogo'][actual]}.")
-            else:
-                self.status.emit("Modo de áudio enviado, mas não confirmado por leitura do fone.")
-        except Exception as e:
-            if not dev.is_connected:
-                self._on_device_disconnected(dev)
-            self.error.emit(f"Erro ao trocar modo de audio: {e}")
-
-    async def _do_set_multipoint(self, enabled: bool):
-        dev = self._device
-        if dev is None:
-            self.error.emit("Não conectado.")
-            return
-        try:
-            await dev.set_multipoint(enabled)
-        except Exception as e:
-            self.error.emit(f"Erro ao trocar multiponto: {e}")
-
-    async def _do_find_earphones(self):
-        dev = self._device
-        if dev is None:
-            self.error.emit("Nao conectado.")
-            return
-        try:
-            await dev.find_earphones()
-        except Exception as e:
-            self.error.emit(f"Erro ao procurar fone: {e}")
-
-    async def _do_set_spatial_audio(self, enabled: bool):
-        dev = self._device
-        if dev is None:
-            self.error.emit("Nao conectado.")
-            return
-        try:
-            await dev.set_spatial_audio(enabled)
-        except Exception as e:
-            self.error.emit(f"Erro ao trocar audio espacial: {e}")
-
-    async def _do_set_wind_noise(self, enabled: bool):
-        dev = self._device
-        if dev is None:
-            self.error.emit("Nao conectado.")
-            return
-        try:
-            await dev.set_wind_noise(enabled)
-        except Exception as e:
-            self.error.emit(f"Erro ao trocar reducao de vento: {e}")
-
-    async def _do_set_wear_config(self, enabled: bool):
-        dev = self._device
-        if dev is None:
-            self.error.emit("Nao conectado.")
-            return
-        try:
-            await dev.set_wear_config(enabled)
-        except Exception as e:
-            self.error.emit(f"Erro ao trocar deteccao de uso: {e}")
-
-    async def _do_set_touch_tone(self, enabled: bool):
-        dev = self._device
-        if dev is None:
-            self.error.emit("Nao conectado.")
-            return
-        try:
-            await dev.set_touch_tone(enabled)
-        except Exception as e:
-            self.error.emit(f"Erro ao trocar tom de toque: {e}")
-
-    async def _do_set_ai_anc(self, enabled: bool):
-        dev = self._device
-        if dev is None:
-            self.error.emit("Nao conectado.")
-            return
-        try:
-            await dev.set_ai_anc(enabled)
-        except Exception as e:
-            self.error.emit(f"Erro ao trocar ANC com IA: {e}")
 
     @property
     def is_connected(self) -> bool:

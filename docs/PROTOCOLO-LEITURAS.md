@@ -85,3 +85,22 @@ Ou seja: ler `0x17` **não é prova de que o fone aceitou o modo**. Foi assim qu
 um teste anterior "descobriu" níveis 5 e 6 que não existem: era eco do lixo.
 A prova real é auditiva, ou comparar o modo com o que a GUI mostra.
 `ANCMode.from_params()` agora devolve `None` para payload fora da tabela.
+
+## Verificação de transporte do EQ (30/10/2026)
+
+O `SET` de EQ usa o custom command `0x22` e um frame RCSP de cerca de 84 bytes.
+Nesta máquina, Bleak/WinRT negociou ATT MTU 247 e a característica RCSP reportou
+`max_write_without_response_size=244`, portanto o frame cabe em uma escrita. O
+código ainda fragmenta pelo limite reportado para não depender disso em outros
+adaptadores/MTUs.
+
+Teste não destrutivo no H3S: ler EQ original (10 bandas todas em `0`), mudar
+temporariamente a primeira banda para `+100` (centésimos de dB), receber ACK com
+status `0`, ler de volta exatamente `[100, 0, ...]` e restaurar `[0, ...]`,
+também confirmado por read-back. Isso valida formato, transporte e aplicação do
+EQ neste firmware; o problema observado era a escrita do frame maior que o
+limite ATT em conexões sem MTU suficiente, sem fragmentação.
+
+Os botões inferiores Música/Filme/Jogo foram retirados: embora `0x2E` responda
+leitura, os SETs desses valores não foram validados de forma confiável no H3S.
+O Game Mode superior (`SET_ADV_INFO` work mode) permanece separado e validado.

@@ -2,7 +2,7 @@
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QColor, QPalette
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
+    QDialog, QDialogButtonBox, QGroupBox, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
     QPushButton, QSlider, QStatusBar, QVBoxLayout, QWidget,
 )
@@ -141,7 +141,6 @@ class MainWindow(QMainWindow):
         self._worker.mode_updated.connect(self._on_mode_updated)
         self._worker.eq_updated.connect(self._on_eq_updated)
         self._worker.game_mode_updated.connect(self._on_game_mode_updated)
-        self._worker.audio_mode_updated.connect(self._on_audio_mode_updated)
 
         self._scan_dialog: ScanDialog | None = None
         self._mode_buttons: list[QPushButton] = []
@@ -252,40 +251,6 @@ class MainWindow(QMainWindow):
 
         root.addWidget(eq_group)
 
-        # ---- Audio mode group ----
-        audio_group = QGroupBox("Modo de Áudio (Music/Movie/Game)")
-        audio_lay = QHBoxLayout(audio_group)
-        self._audio_mode_buttons: list[QPushButton] = []
-        for i, label in enumerate(["Música", "Filme", "Jogo"]):
-            btn = QPushButton(label)
-            btn.setCheckable(True)
-            btn.setEnabled(False)
-            btn.clicked.connect(lambda _, idx=i: self._on_audio_mode_changed(idx))
-            audio_lay.addWidget(btn)
-            self._audio_mode_buttons.append(btn)
-        root.addWidget(audio_group)
-
-        # ---- Features group (H3S-specific) ----
-        feat_group = QGroupBox("Recursos H3S")
-        feat_lay = QGridLayout(feat_group)
-        feat_buttons = [
-            ("Encontrar Fone", self._find_earphones),
-            ("Áudio Espacial", self._toggle_spatial),
-            ("Redução de Vento", self._toggle_wind),
-            ("Detecção de Uso", self._toggle_wear),
-            ("Tom de Toque", self._toggle_touch_tone),
-            ("ANC com IA", self._toggle_ai_anc),
-            ("Multiponto", self._toggle_multipoint),
-        ]
-        for i, (label, handler) in enumerate(feat_buttons):
-            btn = QPushButton(label)
-            btn.setEnabled(False)
-            btn.clicked.connect(handler)
-            feat_lay.addWidget(btn, i // 3, i % 3)
-            setattr(self, f"_feat_btn_{i}", btn)
-        self._feat_buttons = [getattr(self, f"_feat_btn_{i}") for i in range(len(feat_buttons))]
-        root.addWidget(feat_group)
-
         root.addStretch()
 
         # ---- Status bar ----
@@ -307,10 +272,6 @@ class MainWindow(QMainWindow):
         for band in self._eq_bands:
             band.setEnabled(connected)
         for btn in self._eq_preset_buttons:
-            btn.setEnabled(connected)
-        for btn in self._feat_buttons:
-            btn.setEnabled(connected)
-        for btn in self._audio_mode_buttons:
             btn.setEnabled(connected)
         if not connected:
             self._device_label.setText("Não conectado")
@@ -377,10 +338,6 @@ class MainWindow(QMainWindow):
     def _on_game_mode_updated(self, enabled: bool):
         self._game_mode_btn.setChecked(enabled)
 
-    def _on_audio_mode_updated(self, idx: int):
-        for i, btn in enumerate(self._audio_mode_buttons):
-            btn.setChecked(i == idx)
-
     # ------------------------------------------------------------------
     # User actions
     # ------------------------------------------------------------------
@@ -416,62 +373,3 @@ class MainWindow(QMainWindow):
         offsets = [b.value_hundredths() for b in self._eq_bands]
         preset_id = EQ_PRESET_IDS[self._active_preset_idx]
         self._worker.set_eq(offsets, preset_id)
-
-    # ---- H3S feature handlers ----
-    def _find_earphones(self):
-        self._worker.find_earphones()
-        self.statusBar().showMessage("Procurando fone...")
-
-    def _toggle_spatial(self):
-        btn = self._feat_buttons[1]
-        enabled = not btn.property("active")
-        btn.setProperty("active", enabled)
-        self._worker.set_spatial_audio(enabled)
-        label = "ativado" if enabled else "desativado"
-        self.statusBar().showMessage(f"Áudio Espacial {label}.")
-
-    def _toggle_wind(self):
-        btn = self._feat_buttons[2]
-        enabled = not btn.property("active")
-        btn.setProperty("active", enabled)
-        self._worker.set_wind_noise(enabled)
-        label = "ativado" if enabled else "desativado"
-        self.statusBar().showMessage(f"Redução de Vento {label}.")
-
-    def _toggle_wear(self):
-        btn = self._feat_buttons[3]
-        enabled = not btn.property("active")
-        btn.setProperty("active", enabled)
-        self._worker.set_wear_config(enabled)
-        label = "ativado" if enabled else "desativado"
-        self.statusBar().showMessage(f"Detecção de Uso {label}.")
-
-    def _toggle_touch_tone(self):
-        btn = self._feat_buttons[4]
-        enabled = not btn.property("active")
-        btn.setProperty("active", enabled)
-        self._worker.set_touch_tone(enabled)
-        label = "ativado" if enabled else "desativado"
-        self.statusBar().showMessage(f"Tom de Toque {label}.")
-
-    def _toggle_ai_anc(self):
-        btn = self._feat_buttons[5]
-        enabled = not btn.property("active")
-        btn.setProperty("active", enabled)
-        self._worker.set_ai_anc(enabled)
-        label = "ativado" if enabled else "desativado"
-        self.statusBar().showMessage(f"ANC com IA {label}.")
-
-    def _toggle_multipoint(self):
-        btn = self._feat_buttons[6]
-        enabled = not btn.property("active")
-        btn.setProperty("active", enabled)
-        self._worker.set_multipoint(enabled)
-        label = "ativado" if enabled else "desativado"
-        self.statusBar().showMessage(f"Multiponto {label} (pode reiniciar o fone).")
-
-    def _on_audio_mode_changed(self, idx: int):
-        for i, btn in enumerate(self._audio_mode_buttons):
-            btn.setChecked(i == idx)
-        self._worker.set_music_mode(idx)
-        self.statusBar().showMessage(f"Modo de áudio: {['Música','Filme','Jogo'][idx]}")

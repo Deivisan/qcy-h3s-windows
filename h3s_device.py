@@ -218,7 +218,23 @@ class H3SDevice:
             if pkt.has_response:
                 fut = asyncio.get_running_loop().create_future()
                 self._pending[pkt.sn] = fut
-            await self._client.write_gatt_char(WRITE_UUID, data, response=False)
+            # RCSP pode transportar pacotes maiores que um ATT Write Command
+            # (por exemplo, EQ 10 bandas ~84 bytes). O SDK JieLi fragmenta no
+            # transporte conforme o MTU; sem isso, Write Without Response pode
+            # falhar/sumir no Windows sem erro claro. O parser RCSP do fone
+            # remonta o frame usando o comprimento do pacote.
+            characteristic = self._client.services.get_characteristic(WRITE_UUID)
+            max_chunk = (
+                characteristic.max_write_without_response_size
+                if characteristic is not None
+                else 20
+            )
+            if max_chunk <= 0:
+                max_chunk = 20  # ATT default MTU 23 - 3 bytes de cabeçalho
+            for offset in range(0, len(data), max_chunk):
+                await self._client.write_gatt_char(
+                    WRITE_UUID, data[offset:offset + max_chunk], response=False
+                )
             if fut is None:
                 return None
             try:
@@ -226,6 +242,9 @@ class H3SDevice:
             except asyncio.TimeoutError:
                 self._pending.pop(pkt.sn, None)
                 return None
+            except Exception:
+                self._pending.pop(pkt.sn, None)
+                raise
 
     async def notify_communication_way(self, way: int = 0, reconnect: int = 0) -> Packet | None:
         """Tell device we're on BLE (way=0) vs SPP (way=1). Required after BLE connect."""
@@ -466,10 +485,6 @@ class H3SDevice:
         left = _clamp(left, 0, 100, "left")
         right = _clamp(right, 0, 100, "right")
         return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x08, 0x03, left, right, 0x00])))
-
-    async def set_music_mode(self, mode: int) -> Packet | None:
-        """Set music mode (cmd 0x2E)."""
-        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x2E, 0x01, mode])))
 
     async def set_play_mode(self, mode: int) -> Packet | None:
         """Set play mode (cmd 0x37)."""
