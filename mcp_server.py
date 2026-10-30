@@ -16,6 +16,7 @@ Regras que este servidor aplica (não são sugestões):
 """
 import asyncio
 import datetime
+import json
 import os
 import sys
 import time
@@ -29,6 +30,7 @@ from mcp.types import TextContent, Tool
 from bleak import BleakScanner
 
 import h3s_device
+import h3s_device as h
 
 BLE_ADDR = "84:AC:60:F8:A6:BF"
 SCAN_TIMEOUT = 6.0
@@ -93,21 +95,60 @@ async def _connect():
 
 # ── handlers ────────────────────────────────────────────────────────────────
 
-async def h_get_battery(dev, a):        return str(await dev.get_battery())
-async def h_get_mode(dev, a):           return f"Mode index: {await dev.get_mode()}"
+async def h_get_battery(dev, a):
+    pct = await dev.get_battery_percent()
+    return f"Battery: {pct}%" if pct is not None else str(await dev.get_battery())
+
+async def h_get_mode(dev, a):
+    idx = await dev.get_mode()
+    name = h.ANCMode.NAMES[idx] if idx is not None and idx < len(h.ANCMode.NAMES) else "?"
+    return f"Mode index: {idx} ({name})"
+
 async def h_get_game_mode(dev, a):      return f"Game mode: {await dev.get_work_mode()}"
 async def h_get_eq(dev, a):             return f"EQ: {await dev.get_eq()}"
-async def h_get_device_info(dev, a):    return str(await dev.get_device_info())
-async def h_get_wear_status(dev, a):    return str(await dev.get_wear_status())
-async def h_get_hearing_safety(dev, a): return str(await dev.get_hearing_safety())
-async def h_get_wind_noise(dev, a):     return str(await dev.get_wind_noise())
-async def h_get_spatial_audio(dev, a):  return str(await dev.get_spatial_audio())
-async def h_get_spatial_sound(dev, a):  return str(await dev.get_space_sound())
-async def h_get_ai_anc(dev, a):         return str(await dev.get_ai_anc())
-async def h_get_focus_mode(dev, a):     return str(await dev.get_focus_mode())
-async def h_get_privacy_mode(dev, a):   return str(await dev.get_privacy_mode())
-async def h_get_env_adaptation(dev, a): return str(await dev.get_env_adaptation())
-async def h_get_adapt_volume(dev, a):   return str(await dev.get_adapt_volume())
+async def h_get_spatial_sound(dev, a):
+    p = await dev.read_custom(0x2D)
+    return f"Spatial sound: {p[2] == 1} (raw {p.hex(' ')})" if p and len(p) >= 3 else _DEAD.format(cmd="0x2D")
+async def h_get_state(dev, a):          return json.dumps(await dev.get_state(), indent=2)
+
+
+async def _remap_button(dev, a):
+    """Remapeia um botao e devolve o mapa antes/depois, como evidencia."""
+    before = await dev.get_key_settings()
+    if not before:
+        return "fone nao devolveu o mapa de botoes; nada foi gravado"
+    await dev.set_button_func(a["key_id"], a["func_id"], action=a["action"])
+    await asyncio.sleep(2.5)
+    after = await dev.get_key_settings()
+    return (f"antes: {before}\n"
+            f"pedido: key {a['key_id']} action {a['action']} -> func {a['func_id']:#04x}\n"
+            f"depois: {after}")
+
+
+def _dead(cmd: str, what: str):
+    """Leitura que este firmware NAO responde - verificado, nao e bug do app."""
+    async def handler(dev, a):
+        return _DEAD.format(cmd=cmd, what=what)
+    return handler
+
+
+_DEAD = (
+    "nao suportado: o H3S nao responde ao GET {cmd} ({what}). "
+    "Varredura 0x01..0x63 em 29/10/2026: so 13 IDs respondem leitura. "
+    "O SET funciona como fire-and-forget, mas nao ha como confirmar o estado."
+)
+
+h_get_device_info    = _dead("0xF7", "device info")
+h_get_wear_status    = _dead("0x62", "wear status")
+h_get_hearing_safety = _dead("0x58", "hearing safety")
+h_get_wind_noise     = _dead("0x2A", "wind noise")
+h_get_spatial_audio  = _dead("0x5B", "spatial audio")
+h_get_ai_anc         = _dead("0x54", "AI ANC")
+h_get_focus_mode     = _dead("0x39", "focus mode")
+h_get_privacy_mode   = _dead("0x5F", "privacy mode")
+h_get_env_adaptation = _dead("0x32", "env adaptation")
+h_get_adapt_volume   = _dead("0x40", "adaptive volume")
+h_get_button_func    = _dead("0x2B", "button map - use get_state()")
 
 
 async def h_set_anc_mode(dev, a):
@@ -223,21 +264,26 @@ TOOLS: dict[str, dict] = dict([
        lambda dev, a: _done("Disconnected")),
 
     # leitura
-    _b("get_battery", "Battery level", READ, h_get_battery),
+    _b("get_state", "TUDO que o firmware responde numa conexao: bateria, ANC, "
+       "game mode, EQ, LDAC, spatial sound, sleep mode, tone volume, versao e "
+       "o mapa dos botoes fisicos (keyNum/action/function)", READ, h_get_state),
+    _b("get_battery", "Battery level (via ADV info)", READ, h_get_battery),
     _b("get_mode", "Current ANC mode index (0=off,1=transparency,2-6=levels,7=adaptive)", READ, h_get_mode),
-    _b("get_game_mode", "Game mode state", READ, h_get_game_mode),
+    _b("get_game_mode", "Game mode state (via ADV work mode)", READ, h_get_game_mode),
     _b("get_eq", "Current EQ, 10 bands", READ, h_get_eq),
-    _b("get_device_info", "Device info", READ, h_get_device_info),
-    _b("get_wear_status", "Wear detection status", READ, h_get_wear_status),
-    _b("get_hearing_safety", "Hearing safety data", READ, h_get_hearing_safety),
-    _b("get_wind_noise", "Wind noise reduction state", READ, h_get_wind_noise),
-    _b("get_spatial_audio", "Spatial audio state", READ, h_get_spatial_audio),
-    _b("get_spatial_sound", "Spatial sound state", READ, h_get_spatial_sound),
-    _b("get_ai_anc", "AI ANC state", READ, h_get_ai_anc),
-    _b("get_focus_mode", "Focus mode state", READ, h_get_focus_mode),
-    _b("get_privacy_mode", "Privacy mode state", READ, h_get_privacy_mode),
-    _b("get_env_adaptation", "Environment adaptation state", READ, h_get_env_adaptation),
-    _b("get_adapt_volume", "Adaptive volume state", READ, h_get_adapt_volume),
+    _b("get_device_info", "NAO SUPORTADO: firmware nao responde GET 0xF7", READ, h_get_device_info),
+    _b("get_wear_status", "NAO SUPORTADO: firmware nao responde GET 0x62", READ, h_get_wear_status),
+    _b("get_hearing_safety", "NAO SUPORTADO: firmware nao responde GET 0x58", READ, h_get_hearing_safety),
+    _b("get_wind_noise", "NAO SUPORTADO: firmware nao responde GET 0x2A", READ, h_get_wind_noise),
+    _b("get_spatial_audio", "NAO SUPORTADO: firmware nao responde GET 0x5B", READ, h_get_spatial_audio),
+    _b("get_spatial_sound", "Spatial sound state (GET 0x2D - funciona)", READ, h_get_spatial_sound),
+    _b("get_ai_anc", "NAO SUPORTADO: firmware nao responde GET 0x54", READ, h_get_ai_anc),
+    _b("get_focus_mode", "NAO SUPORTADO: firmware nao responde GET 0x39", READ, h_get_focus_mode),
+    _b("get_privacy_mode", "NAO SUPORTADO: firmware nao responde GET 0x5F", READ, h_get_privacy_mode),
+    _b("get_env_adaptation", "NAO SUPORTADO: firmware nao responde GET 0x32", READ, h_get_env_adaptation),
+    _b("get_adapt_volume", "NAO SUPORTADO: firmware nao responde GET 0x40", READ, h_get_adapt_volume),
+    _b("get_button_func", "Mapa dos botoes - leia com get_state (GET 0x2B nao responde)",
+       READ, h_get_button_func),
 
     # escrita reversível
     _b1("set_anc_mode", "Set ANC mode index (0=off,1=transparency,2-6=levels,7=adaptive)",
@@ -248,7 +294,7 @@ TOOLS: dict[str, dict] = dict([
         [("left", "integer"), ("right", "integer")]),
     _b1("set_balance", "Set L/R balance (clamped 0-255)", WRITE,
         _int_setter("set_balance", "balance", "Balance"), "balance", "integer"),
-    _b1("set_touch_tone_volume", "Set tone/notification volume (clamped 0-100)", WRITE,
+    _b1("set_touch_tone_volume", "Set tone/notification volume (0-8; acima de 8 vira 8)", WRITE,
         _int_setter("set_tone_volume", "volume", "Tone volume"), "volume", "integer"),
     _b1("set_in_ear_sensitivity", "Set in-ear sensitivity (clamped 0-255)", WRITE,
         _int_setter("set_inear_sensitivity", "sensitivity", "In-ear sensitivity"),
@@ -281,10 +327,12 @@ TOOLS: dict[str, dict] = dict([
         _bool_setter("set_led_switch", "LED switch"), "enabled", "boolean"),
     _b1("set_light", "Enable/disable flashlight", WRITE,
         _bool_setter("set_light", "Light"), "enabled", "boolean"),
-    _b2("set_button_func", "Remap touch button", WRITE,
-        lambda dev, a: _todo(dev.set_button_func(a["key_id"], a["func_id"]),
-                             f"Button {a['key_id']} -> {a['func_id']}"),
-        [("key_id", "integer"), ("func_id", "integer")]),
+    _b2("set_button_func", "Remapeia UM botao (keyNum+action) regravando o mapa "
+        "inteiro via SET_ADV_INFO 0xC0. O que cada action 1..5 faz NAO foi "
+        "validado - leia o mapa com get_state() antes e confira depois. "
+        "func: 0x00/0x7F=sem funcao, 0xFF=trocar modo ANC, 0x01=play/pause.",
+        WRITE, _remap_button,
+        [("key_id", "integer"), ("func_id", "integer"), ("action", "integer")]),
     _b1("music_control", "Music control on the paired phone: 1=play,2=pause,3=prev,4=next",
         WRITE, h_music_control, "action", "integer"),
     _b("take_photo", "Remote camera shutter on the paired phone", WRITE, h_take_photo),
