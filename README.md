@@ -56,6 +56,36 @@ expostos (OTA, TESTMODE, SENSOR_TEST, ATPX, PAIRNAME).
 
 ---
 
+## O que o fone realmente responde
+
+**Só 13 dos 99 command IDs aceitam leitura** — o resto dá timeout silencioso.
+Uma varredura completa está em [`docs/PROTOCOLO-LEITURAS.md`](docs/PROTOCOLO-LEITURAS.md).
+
+Na prática: use `get_state` (MCP) ou `H3SDevice.get_state()`. Ele lê numa
+conexão só: bateria, modo ANC, game mode, EQ, LDAC, áudio espacial, sleep mode,
+volume do tom, versão e o **mapa dos botões físicos**.
+
+```python
+await dev.get_state()
+# {'battery_pct': 50, 'anc_index': 7, 'anc_name': 'Adaptativo (AI)',
+#  'game_mode': False, 'ldac': False, 'space_sound': False,
+#  'sleep_mode': 2, 'tone_volume': 6, 'version_raw': '30 03 00 01 08',
+#  'key_settings': [(7, 1, 1), (7, 2, 7), ...]}
+```
+
+As tools de leitura sem suporte no firmware (`get_wind_noise`, `get_wear_status`,
+`get_focus_mode`, `get_privacy_mode`, ...) agora dizem isso explicitamente em vez
+de devolver `null`.
+
+### Botões físicos
+
+O mapa de botões é `[keyNum, action, function]` e vem por `GET_ADV_INFO` tipo 2.
+Gravar usa `SET_ADV_INFO` (0xC0) com a **lista inteira** — o `0x2B` do fork
+original nunca funcionou. Detalhes e o porquê em
+[`docs/BOTOES.md`](docs/BOTOES.md).
+
+---
+
 ## Executar a partir do código-fonte
 
 ### Pré-requisitos
