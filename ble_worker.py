@@ -4,7 +4,7 @@ Qt signals carry results back to the UI thread.
 import asyncio
 import threading
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QSettings, Signal
 
 from h3s_device import H3SDevice, scan, scan_including_paired
 from rcsp import parse_tlv, AdvType
@@ -27,6 +27,7 @@ class BleWorker(QObject):
         self._device: H3SDevice | None = None
         self._ready = threading.Event()
         self._operation_lock: asyncio.Lock | None = None
+        self._settings: QSettings | None = None
 
     # ------------------------------------------------------------------
     # Thread lifecycle
@@ -42,6 +43,7 @@ class BleWorker(QObject):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         self._operation_lock = asyncio.Lock()
+        self._settings = QSettings("Deivison Santana", "Controle QCY H3")
         self._ready.set()
         self._loop.run_forever()
 
@@ -93,7 +95,11 @@ class BleWorker(QObject):
                 dev = self._device
                 self.scan_result.emit([(dev.address, "QCY H3S (conectado)", None)])
                 return
-            devices = await scan_including_paired(timeout=timeout)
+            last_address = self._settings.value("bluetooth/last_address", "") if self._settings else ""
+            devices = await scan_including_paired(
+                timeout=timeout,
+                known_addresses=[last_address] if last_address else [],
+            )
             self.scan_result.emit(devices)
         except Exception as e:
             self.error.emit(f"Scan error: {e}")
@@ -117,6 +123,9 @@ class BleWorker(QObject):
             await candidate.notify_communication_way(way=0, reconnect=0)
             if not candidate.is_connected:
                 raise RuntimeError("O link BLE caiu durante o handshake RCSP.")
+            if self._settings:
+                self._settings.setValue("bluetooth/last_address", address)
+                self._settings.sync()
             await asyncio.sleep(0.2)
             # Emit connected signal with device name (from adv or address)
             self.connected.emit(address)

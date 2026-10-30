@@ -947,7 +947,6 @@ QCY_SERVICE_UUID = "0000a002-0000-1000-8000-00805f9b34fb"
 # Endereço BLE GATT validado no hardware H3S deste projeto. O Windows pode
 # não anunciar o GATT quando o headset já está conhecido/conectado; o MAC
 # clássico mostrado em Configurações Bluetooth não é intercambiável com este.
-QCY_H3S_BLE_ADDRESS = "84:AC:60:F8:A6:BF"
 _BLE_DEVICE_CACHE: dict[str, BLEDevice] = {}
 
 
@@ -1004,18 +1003,21 @@ def _resolve_name(name: str, service_uuids: list) -> str:
     return ""
 
 
-async def scan_including_paired(timeout: float = 6.0) -> list:
+async def scan_including_paired(timeout: float = 6.0, known_addresses: list[str] | None = None) -> list:
     """Scan BLE + tenta incluir fones QCY já pareados que não advertising.
 
-    Windows pode não anunciar dispositivos já pareados/conectados. O MAC
-    clássico listado pelo PnP não é o endereço BLE GATT, então usamos o
-    endereço BLE validado do H3S como fallback de conexão (não como prova de
-    que o dispositivo está ligado; a tentativa BLE confirma isso).
+    Windows pode não anunciar dispositivos já conhecidos/conectados. Endereços
+    BLE vistos antes são oferecidos como fallback. O MAC clássico listado pelo
+    PnP não é intercambiável com o endereço BLE GATT, e presença na lista não
+    prova que o dispositivo está ligado.
     """
     items = await scan(timeout=timeout, only_qcy=True)
     found_addrs = {a.casefold() for a, _, _ in items}
-    if QCY_H3S_BLE_ADDRESS.casefold() not in found_addrs:
-        items.append((QCY_H3S_BLE_ADDRESS, "QCY H3S (endereço BLE conhecido)", None))
+    for address in known_addresses or []:
+        address = str(address).strip()
+        if address and address.casefold() not in found_addrs:
+            items.append((address, "QCY H3/H3S (último dispositivo usado)", None))
+            found_addrs.add(address.casefold())
     items.sort(key=lambda x: x[2] if x[2] is not None else -999, reverse=True)
     return items
 
@@ -1023,9 +1025,9 @@ async def scan_including_paired(timeout: float = 6.0) -> list:
 async def scan(timeout: float = 6.0, only_qcy: bool = True) -> list:
     """Escaneia BLE.
 
-    Por padrão retorna apenas dispositivos QCY H3S (filtrando o ruído de
+    Por padrão retorna dispositivos QCY da família H3/H3S (filtrando o ruído de
     outros aparelhos). Cada item é (address, name, rssi). Dispositivos que
-    anunciam o serviço RCSP mas sem nome recebem o nome 'QCY H3S (BLE)'.
+    anunciam o serviço RCSP mas sem nome recebem um nome amigável da família.
     """
     result = await BleakScanner.discover(timeout=timeout, return_adv=True)
     items = []

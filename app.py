@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication
 from main_window import MainWindow
 
 
-APP_VERSION = "0.1.0-beta"
+APP_VERSION = "0.1.1-beta"
 
 STYLESHEET = """
 QWidget {

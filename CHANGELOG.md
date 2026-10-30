@@ -1,5 +1,15 @@
 # Histórico de versões
 
+## 0.1.1-beta — 2026-10-30
+
+- README reorganizado para usuários e desenvolvedores, com atalhos, limitações,
+  privacidade e solução de problemas.
+- Capturas reais da interface adicionadas; estados de demonstração identificados
+  e endereço Bluetooth mascarado.
+- Documentada a compatibilidade-alvo com QCY H3 padrão e H3S, separando o modelo
+  testado em hardware (H3S) do H3 padrão ainda pendente de validação física.
+- Criados FAQ, roteiro de teste beta e formulário de bug.
+
 ## 0.1.0-beta — 2026-10-30
 
 Primeira beta pública para validação em outros computadores Windows.

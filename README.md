@@ -1,373 +1,146 @@
-# Controle QCY H3 — Windows
-
-Aplicativo pessoal e independente para Windows para gerenciar fones **QCY H3 / H3S** via Bluetooth Low Energy (BLE). Interface em português e protocolo direto, sem depender do app oficial.
-
-> **Versão 0.1.0-beta:** H3S validado no hardware disponível. A compatibilidade com o H3 padrão ainda está em teste; reporte resultados para ajudar a validar em outros computadores e firmwares.
-
-![Símbolo do Controle QCY H3](assets/qcy-h3-control.svg)
-
----
-
-## Download — Usuário Final
-
-> Não precisa instalar Python nem nenhuma dependência.
-
-**[Baixar a versão beta 0.1.0](https://github.com/Deivisan/qcy-h3s-windows/releases/tag/v0.1.0-beta)**
-
-### Como usar
-
-1. Ligue o fone e ative o Bluetooth no PC
-2. Execute `Controle_QCY_H3_0.1.0-beta.exe`
-3. Clique em **Conectar fone** — o fone aparecerá na lista
-4. Selecione-o e confirme a conexão
-5. Controle ANC, EQ e Game Mode diretamente pelo app
-
-**Requisitos:** Windows 10 ou 11 com adaptador Bluetooth BLE (Bluetooth 4.0+)
+<div align="center">
+  <img src="assets/qcy-h3-control.svg" width="112" alt="Símbolo original do Controle QCY H3">
+  <h1>Controle QCY H3</h1>
+  <p>Gerenciador Bluetooth pessoal para QCY H3 e QCY H3S</p>
+  <p><strong>Beta de testes · v0.1.1-beta · Windows 10/11</strong></p>
+  <p><a href="https://github.com/Deivisan/qcy-h3s-windows/releases/tag/v0.1.1-beta">Baixar o aplicativo</a> · <a href="docs/COMPATIBILIDADE.md">Compatibilidade</a> · <a href="docs/FAQ.md">Ajuda</a></p>
+</div>
 
 ---
 
-## Funcionalidades
+## Visão geral
 
-| Recurso | Descrição |
-|---------|-----------|
-| **Modos de ruído** | ANC Desligado, Transparência, ANC Baixo, ANC Médio, ANC Alto, Adaptativo |
-| **Equalizador 10 bandas** | 55 Hz · 220 Hz · 500 Hz · 1 kHz · 1,8 kHz · 2,8 kHz · 4,5 kHz · 7,5 kHz · 10 kHz · 22 kHz |
-| **Presets de EQ** | Custom, Default, Pop, Heavy Bass, Rock, Soft, Classic |
-| **Game Mode** | Ativa modo de baixa latência para jogos |
-| **Bateria** | Exibe nível atual, atualiza a cada 60 segundos |
+Aplicativo desktop independente para ajustar funções do fone pelo Bluetooth
+Low Energy (BLE), sem depender do aplicativo oficial da QCY. O projeto é feito
+para **QCY H3 padrão e QCY H3S**. O H3S foi testado em hardware; no H3 padrão,
+a compatibilidade depende da revisão e do firmware e ainda precisa de relatos
+de outros usuários.
 
-### Atalhos e ajuda
+O download é um executável portátil: não precisa instalar Python ou pacotes.
 
-| Atalho | Ação |
+## Capturas de tela
+
+As imagens abaixo mostram a interface e seus controles. **Os valores e o estado
+de conexão nas capturas são ilustrativos**; eles não representam uma conexão
+ativa nem a leitura de um fone durante a captura.
+
+### Painel de controle
+
+Conexão, nível de bateria, modos de ruído, Game Mode e equalizador na mesma tela.
+
+![Painel principal do Controle QCY H3](docs/images/painel.png)
+
+### Equalizador de 10 bandas
+
+Presets rápidos ou ajuste individual das bandas, com feedback de leitura após
+aplicar.
+
+![Tela do equalizador e presets](docs/images/equalizador.png)
+
+### Localizar e conectar o fone
+
+O endereço na imagem é fictício e foi mascarado para proteger identificadores
+Bluetooth reais.
+
+![Janela de busca de dispositivos](docs/images/conectar-fone.png)
+
+## Baixar e começar
+
+1. Acesse a [release v0.1.1-beta](https://github.com/Deivisan/qcy-h3s-windows/releases/tag/v0.1.1-beta).
+2. Baixe `Controle_QCY_H3_0.1.1-beta.exe`.
+3. Ligue o fone e ative o Bluetooth do computador.
+4. Abra o executável e selecione **Conectar fone**.
+5. Escolha o QCY H3/H3S na lista. Se não aparecer, consulte [solução de problemas](docs/FAQ.md).
+
+**Requisitos:** Windows 10 ou 11 e adaptador Bluetooth com suporte BLE. O
+aplicativo usa a conexão BLE de controle do fone; pareamento de áudio no Windows
+e conexão BLE de controle são coisas relacionadas, mas não idênticas.
+
+## O que dá para controlar
+
+| Recurso | O que faz |
 |---|---|
-| `Ctrl+K` | Buscar e conectar fone |
-| `Ctrl+G` | Alternar Game Mode |
-| `Ctrl+Enter` | Aplicar equalizador |
-| `Ctrl+0` | Zerar as bandas do EQ |
-| `F1` | Abrir ajuda e compatibilidade |
+| Modos de ruído | ANC desligado, transparência, níveis de ANC e modo adaptativo disponíveis no firmware testado |
+| Equalizador | 10 bandas, presets e ajuste de −12 a +12 dB; após aplicar, o app lê o EQ de volta |
+| Game Mode | Alterna o modo de baixa latência; é separado dos modos de ruído |
+| Bateria | Mostra o nível reportado pelo fone e atualiza periodicamente |
+| Atalhos | `Ctrl+K` conectar, `Ctrl+G` Game Mode, `Ctrl+Enter` aplicar EQ, `Ctrl+0` zerar EQ, `F1` ajuda |
 
-Os cartões têm entrada animada sutil, os botões indicam seleção/hover e a tela
-se adapta a janelas menores por rolagem. Os arquivos vetoriais do símbolo e os
-ícones de modo ficam em [`assets/`](assets/).
+Controles que não foram confirmados no H3S — como áudio espacial, redução de
+vento, detecção de uso, tom de toque e modos Música/Filme/Jogo — foram deixados
+fora da interface para não sugerir que funcionam. O Game Mode superior é um
+comando diferente e continua disponível.
 
----
+## Compatibilidade e limites da beta
 
-## ⚠️ Comandos destrutivos
+- O programa é direcionado ao **QCY H3 e ao QCY H3S**.
+- O QCY H3S foi conectado e testado nesta implementação, incluindo ANC, bateria,
+  Game Mode e alteração/read-back do EQ.
+- Não temos ainda uma unidade QCY H3 padrão para validar cada firmware e revisão.
+  Se testar nesse modelo, informe o resultado usando o [relatório de teste](docs/TESTES-BETA.md).
+- O protocolo e o comportamento BLE podem variar entre revisões, firmware,
+  adaptadores Bluetooth e drivers do Windows.
+- A confirmação falada pelo fone é gerada pelo firmware; o aplicativo não pode
+  garantir que ela será reproduzida em toda troca de modo.
+- Esta é uma beta de testes, não uma versão certificada nem um aplicativo oficial.
 
-Este projeto fala o protocolo RCSP/Jieli direto no fone. Alguns comandos **não
-têm volta** e o fone reinicia no meio deles.
+Consulte a [matriz de compatibilidade e validação](docs/COMPATIBILIDADE.md) para
+separar o que foi observado em hardware do que ainda precisa ser testado.
 
-| Comando | Efeito |
-|---------|--------|
-| `set_ldac` (`0x23`) | liga/desliga LDAC — **o fone reinicia** e o A2DP cai |
-| `reset_default` (`0x01`) | volta todas as configurações ao padrão |
-| `clear_pair` (`0x02`) | apaga os registros de pareamento |
-| `factory_reset` (`0x03`) | reset de fábrica |
+## Solução rápida de problemas
 
-No servidor MCP essas quatro tools **exigem confirmação explícita**
-(`confirm="SET_LDAC"`, `confirm="FACTORY_RESET"`, ...), rodam uma por vez e
-entram em quarentena depois de executar.
+1. **O fone não aparece:** confirme que está ligado e próximo, feche temporariamente
+   o app oficial/outros controladores BLE e tente novamente.
+2. **Aparece, mas falha ao conectar:** outro cliente pode estar usando o canal de
+   controle. Desconecte-o e tente novamente; veja [FAQ](docs/FAQ.md).
+3. **Um clique não parece mudar o fone:** aguarde a leitura/status do app. Um ACK
+   de protocolo nem sempre prova que o firmware aplicou o estado.
+4. **O EQ não mantém os valores:** o app lê o EQ depois do envio e mostra os
+   valores retornados pelo fone; firmware pode limitar ou rejeitar alterações.
 
-**Leia antes de usar:** [`docs/COMANDOS-DESTRUTIVOS.md`](docs/COMANDOS-DESTRUTIVOS.md)
-— auditoria completa dos ~85 command IDs, com os que são de propósito **não**
-expostos (OTA, TESTMODE, SENSOR_TEST, ATPX, PAIRNAME).
+Para relatar um problema, inclua modelo, versão do Windows, adaptador Bluetooth,
+passos para reproduzir e o resultado esperado/obtido. **Remova endereço MAC,
+serial e outros identificadores pessoais** antes de anexar logs ou capturas.
+[Abrir um relato](https://github.com/Deivisan/qcy-h3s-windows/issues/new).
 
----
+## Privacidade e segurança
 
-## O que o fone realmente responde
+- O aplicativo conversa localmente com o fone por BLE; não implementa conta,
+  telemetria ou envio de dados para um servidor.
+- O endereço BLE do último fone conectado é salvo apenas nas configurações locais
+  do usuário do Windows para facilitar a reconexão; não há um MAC de unidade
+  pessoal embutido na instalação nova.
+- O Windows pode exibir o aviso do SmartScreen porque o executável beta não é
+  assinado digitalmente. Baixe somente da release deste repositório.
+- Não há atualização de firmware/OTA neste aplicativo.
+- Comandos de reset, pareamento, LDAC e outras funções potencialmente destrutivas
+  não fazem parte da interface gráfica.
 
-**Só 13 dos 99 command IDs aceitam leitura** — o resto dá timeout silencioso.
-Uma varredura completa está em [`docs/PROTOCOLO-LEITURAS.md`](docs/PROTOCOLO-LEITURAS.md).
+## Para quem vai desenvolver
 
-Na prática: use `get_state` (MCP) ou `H3SDevice.get_state()`. Ele lê numa
-conexão só: bateria, modo ANC, game mode, EQ, LDAC, áudio espacial, sleep mode,
-volume do tom, versão e o **mapa dos botões físicos**.
-
-```python
-await dev.get_state()
-# {'battery_pct': 50, 'anc_index': 7, 'anc_name': 'Adaptativo (AI)',
-#  'game_mode': False, 'ldac': False, 'space_sound': False,
-#  'sleep_mode': 2, 'tone_volume': 6, 'version_raw': '30 03 00 01 08',
-#  'key_settings': [(7, 1, 1), (7, 2, 7), ...]}
-```
-
-As tools de leitura sem suporte no firmware (`get_wind_noise`, `get_wear_status`,
-`get_focus_mode`, `get_privacy_mode`, ...) agora dizem isso explicitamente em vez
-de devolver `null`.
-
-### Botões físicos
-
-O mapa de botões é `[keyNum, action, function]` e vem por `GET_ADV_INFO` tipo 2.
-Gravar usa `SET_ADV_INFO` (0xC0) com a **lista inteira** — o `0x2B` do fork
-original nunca funcionou. Detalhes e o porquê em
-[`docs/BOTOES.md`](docs/BOTOES.md).
-
----
-
-## Executar a partir do código-fonte
-
-### Pré-requisitos
-
-- Python 3.11 ou superior
-- Windows 10/11
-
-### Instalação
-
-```bash
+```powershell
 git clone https://github.com/Deivisan/qcy-h3s-windows.git
 cd qcy-h3s-windows
-pip install PySide6 bleak
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt pyinstaller
 python app.py
 ```
 
-### Gerar o executável
+Executar testes e gerar o executável:
 
-```bash
-pip install pyinstaller
+```powershell
+python -m unittest discover -s tests -v
 python tools/build_icon.py
 pyinstaller --noconfirm QCY_H3_Controller.spec
-# Resultado: dist/QCY_H3_Controller.exe
 ```
 
----
-
-## Estrutura do projeto
-
-```
-qcy_h3/
-├── app.py            # Ponto de entrada — inicializa Qt e abre a janela
-├── main_window.py    # Interface gráfica (PySide6)
-├── ble_worker.py     # Worker BLE em thread separada (asyncio + Qt signals)
-├── h3_device.py      # Protocolo do dispositivo QCY H3S
-└── rcsp.py           # Implementação do protocolo RCSP/JieLi
-```
-
----
-
-## Documentação técnica
-
-### Visão geral
-
-O QCY H3S se comunica via **Bluetooth Low Energy (BLE)** usando o protocolo proprietário **JieLi RCSP** (*Remote Control Service Protocol*), desenvolvido pela JieLi Technology (杰理科技) — fabricante do chip do fone.
-
-A comunicação acontece num serviço GATT customizado:
-
-| Papel | UUID |
-|-------|------|
-| Serviço | `0000a002-0000-1000-8000-00805f9b34fb` |
-| Write (host → fone) | `00000001-0000-1000-8000-00805f9b34fb` |
-| Notify (fone → host) | `00000002-0000-1000-8000-00805f9b34fb` |
-
----
-
-### Chip e firmware
-
-O fone usa um **JieLi JL7018F6** (32-bit dual-core DSP, BT 6.0 + BR/EDR + BLE,
-LDAC/LHDC/AAC/SBC). O estudo completo de viabilidade de firmware — fluxo OTA
-RCSP, quais checagens o fone faz, o container `.UFW` e por que não existe
-assinatura criptográfica — está em
-[`qcy-toolkit/docs/FIRMWARE-JL7018.md`](https://github.com/Deivisan/qcy-toolkit/blob/main/docs/FIRMWARE-JL7018.md).
-
-Resumo: **este projeto não implementa OTA.** Não por falta de protocolo (o
-formato está mapeado), mas porque um flash errado pode brickar o fone e não há
-firmware alternativo para gravar.
-
-### Protocolo RCSP — formato de pacote
-
-Todos os pacotes seguem a estrutura:
-
-```
-[FE DC BA] [flag:1] [opCode:1] [paramLen:2 BE] [sn:1] [params:N] [EF]
-```
-
-| Campo | Tamanho | Descrição |
-|-------|---------|-----------|
-| Header | 3 bytes | `FE DC BA` fixo |
-| flag | 1 byte | bit7=tipo (1=comando, 0=resposta), bit6=esperaResposta |
-| opCode | 1 byte | Operação desejada |
-| paramLen | 2 bytes | Tamanho do corpo (big-endian), inclui o `sn` |
-| sn | 1 byte | Número de sequência — a resposta devolve o mesmo `sn` |
-| params | N bytes | Parâmetros da operação |
-| Footer | 1 byte | `EF` fixo |
-
-**Exemplo — GetTargetInfo (opCode=3, sem parâmetros):**
-```
-FE DC BA  C0  03  00 01  01  EF
-│         │   │   │       │
-│         │   │   │       └─ sn=1
-│         │   │   └──────── paramLen=1 (só o sn)
-│         │   └──────────── opCode=3 (GET_TARGET_INFO)
-│         └────────────────  flag=0xC0 (comando + espera resposta)
-└──────────────────────────  header
-```
-
----
-
-### OpCodes relevantes
-
-| Constante | Valor | Uso |
-|-----------|-------|-----|
-| `GET_TARGET_INFO` | 3 | Info do dispositivo |
-| `NOTIFY_COMMUNICATION_WAY` | 11 | Handshake inicial (BLE=0) |
-| `GET_SYS_INFO` | 7 | Informações do sistema |
-| `SET_ADV_INFO` | 192 (0xC0) | Configura parâmetros de anúncio (game mode) |
-| `GET_ADV_INFO` | 193 (0xC1) | Lê parâmetros (bateria, game mode) |
-| `CUSTOM` | 255 (0xFF) | Sub-protocolo QCY (ANC, EQ) |
-
----
-
-### Sub-protocolo Custom (opCode 0xFF)
-
-Todos os comandos de ANC e EQ usam o opCode `CUSTOM` com parâmetros que seguem o padrão:
-
-- **GET:** `FE 01 [cmd]` — solicita leitura do recurso `cmd`
-- **SET:** `[cmd] [len] [dados...]` — grava o recurso
-
----
-
-### Modos de ruído (ANC)
-
-Parâmetros do comando Custom, sub-comando `0x17`:
-
-```
-params = [0x17, 0x03, sub, group, level]
-```
-
-| Modo | sub | group | level | Label no app |
-|------|-----|-------|-------|--------------|
-| ANC Desligado | `0x02` | `0x00` | `0x00` | ANC Desligado |
-| Transparência | `0x03` | `0x01` | `0x04` | Transparência |
-| ANC Baixo | `0x01` | `0x01` | `0x00` | ANC Baixo |
-| ANC Médio | `0x01` | `0x01` | `0x01` | ANC Médio |
-| ANC Alto | `0x01` | `0x01` | `0x02` | ANC Alto |
-| Adaptativo | `0x01` | `0x05` | `0x00` | Adaptativo |
-
-Para **ler** o modo atual:
-```
-GET params = [0xFE, 0x01, 0x17]
-```
-
----
-
-### Equalizador (10 bandas)
-
-#### Leitura
-
-```
-GET params = [0xFE, 0x01, 0x22]
-```
-
-A resposta retorna uma lista de entradas de 7 bytes cada:
-
-```
-[freq:2 LE] [delta_db:2 LE signed] [ref_gain:2 LE] [Q:1]
-```
-
-Frequências suportadas (little-endian):
-
-| Label | Valor (hex) |
-|-------|-------------|
-| 55 Hz | `0x0037` |
-| 220 Hz | `0x00DC` |
-| 500 Hz | `0x01F4` |
-| 1 kHz | `0x03E8` |
-| 1,8 kHz | `0x0708` |
-| 2,8 kHz | `0x0AF0` |
-| 4,5 kHz | `0x1194` |
-| 7,5 kHz | `0x1D4C` |
-| 10 kHz | `0x2710` |
-| 22 kHz | `0x55F0` |
-
-O `delta_db` está em **centésimos de dB** (ex.: `+600` = `+6,00 dB`).
-
-#### Gravação
-
-```
-SET params = [0x22] [data_len] [preset_id] [0x70] [0xFE] [10 × 7 bytes de banda]
-```
-
-`data_len` = 3 (cabeçalho) + 70 (bandas) = `0x49`
-
-**preset_id:**
-
-| ID | Preset |
-|----|--------|
-| `0x00` | Custom (definido pelo usuário) |
-| `0x01` | Default |
-| `0x02` | Pop |
-| `0x03` | Heavy Bass |
-| `0x04` | Rock |
-| `0x05` | Soft |
-| `0x06` | Classic |
-
----
-
-### Game Mode
-
-Usa o opCode `SET_ADV_INFO` (0xC0) com parâmetros no formato TLV:
-
-```
-params = [0x02, 0x05, value]
-         │      │     └─ 0x02 = ativar, 0x01 = desativar
-         │      └──────── ADV type 5 = WORK_MODE
-         └─────────────── length = 2
-```
-
-Para ler o estado atual, usa `GET_ADV_INFO` (0xC1) com máscara `1 << 5`.
-
----
-
-### Bateria
-
-Usa `GET_ADV_INFO` (0xC1) com máscara `1 << 0` (ADV type 0 = BATTERY_QUANTITY).
-
-A resposta vem em formato TLV: `[len][type][value...]`  
-`value[0]` = percentual da bateria (0–100).
-
----
-
-### Handshake de conexão
-
-Após conectar via BLE e registrar as notificações, é obrigatório enviar:
-
-```python
-Packet(op_code=OpCode.NOTIFY_COMMUNICATION_WAY, params=bytes([0x00, 0x00]))
-# way=0 (BLE), reconnect=0
-```
-
-Sem esse handshake o dispositivo não responde a comandos subsequentes.
-
----
-
-### Arquitetura da aplicação
-
-```
-Qt Main Thread                    BLE Thread (daemon)
-──────────────────────            ──────────────────────────
-MainWindow                        BleWorker._run_loop()
-  │                                 asyncio event loop
-  ├─ clica Escanear ──────────────► _do_scan()
-  │                                   BleakScanner.discover()
-  │◄─ scan_result(list) ────────────── emit()
-  │
-  ├─ seleciona device ────────────► _do_connect(addr)
-  │                                   H3Device.connect()
-  │                                   notify_communication_way()
-  │                                   _do_refresh()
-  │◄─ connected(addr) ──────────────── emit()
-  │◄─ battery_updated(pct) ─────────── emit()
-  │◄─ mode_updated(idx) ────────────── emit()
-  │◄─ eq_updated(offsets) ──────────── emit()
-  │
-  ├─ clica modo ANC ──────────────► _do_set_mode(bytes)
-  ├─ clica Apply EQ ──────────────► _do_set_eq(offsets, preset_id)
-  └─ clica Game Mode ─────────────► _do_set_game_mode(enabled)
-```
-
-Os sinais Qt cruzam a barreira de threads com segurança via **queued connection** automática do PySide6.
-
----
-
-## Licença
-
-MIT License — livre para usar, modificar e distribuir.
+O resultado do build fica em `dist/QCY_H3_Controller.exe`. O protocolo RCSP,
+leituras observadas, notas de Bluetooth no Windows e botões físicos estão na
+[documentação técnica](docs/README.md).
+
+## Licença e marca
+
+Código sob licença MIT. QCY, H3 e H3S são marcas de seus respectivos titulares.
+Este é um projeto pessoal e independente, sem afiliação ou endosso oficial da
+QCY.

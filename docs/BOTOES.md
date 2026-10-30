@@ -1,6 +1,6 @@
 # Botões físicos do H3S — o que dá e o que não dá
 
-Medido em 29/10/2026 no fone real (`84:AC:60:F8:A6:BF`), firmware
+Medido em 29/10/2026 no QCY H3S real, firmware
 `30 03 00 01 08`. Tudo aqui é observação de hardware, não leitura de código.
 
 ## Resumo
@@ -109,9 +109,9 @@ como provar sem o tipo 10.
 ## Ferramentas
 
 ```python
-import asyncio, h3s_device as h
+import asyncio, os, h3s_device as h
 
-dev = h.H3SDevice("84:AC:60:F8:A6:BF")
+dev = h.H3SDevice(os.environ["QCY_H3_BLE_ADDRESS"])
 await dev.connect()
 await dev.notify_communication_way(way=0)   # handshake obrigatorio no BLE
 

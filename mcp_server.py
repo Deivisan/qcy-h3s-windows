@@ -27,12 +27,10 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from bleak import BleakScanner
-
 import h3s_device
 import h3s_device as h
 
-BLE_ADDR = "84:AC:60:F8:A6:BF"
+BLE_ADDR = os.environ.get("QCY_H3_BLE_ADDRESS", "").strip()
 SCAN_TIMEOUT = 6.0
 
 READ = "read"
@@ -67,23 +65,36 @@ async def _connect():
     if _device is not None and _device.is_connected:
         return _device
 
-    # 1) tenta direto no endereço fixo
-    dev = h3s_device.H3SDevice(BLE_ADDR)
-    try:
-        await dev.connect()
-    except Exception:
-        # 2) fallback: varre e confirma que o endereço realmente está no ar
-        found = await BleakScanner.discover(timeout=SCAN_TIMEOUT)
-        target = next(
-            (d.address for d in found
-             if d.address.upper().replace(":", "") == BLE_ADDR.replace(":", "")),
-            None,
+    # Endereço por instalação, nunca embutir o MAC pessoal de uma unidade no
+    # código publicado. Sem configuração, aceitar somente um H3/H3S detectado.
+    target = BLE_ADDR
+    if target:
+        dev = h3s_device.H3SDevice(target)
+        try:
+            await dev.connect()
+        except Exception:
+            try:
+                await dev.disconnect()
+            except Exception:
+                pass
+            target = ""
+
+    if not target:
+        found = await h3s_device.scan_including_paired(
+            timeout=SCAN_TIMEOUT,
+            known_addresses=[BLE_ADDR] if BLE_ADDR else [],
         )
-        if not target:
+        matches = [
+            address for address, name, _rssi in found
+            if name and any(marker in name.casefold() for marker in ("h3", "h3s"))
+        ]
+        if len(matches) != 1:
             raise RuntimeError(
-                "H3S-APP não encontrado no scan BLE. Fone ligado e perto? "
-                "(se o scan BLE voltar 0 dispositivos, o rádio do Windows travou)"
+                "Não foi possível identificar um único QCY H3/H3S. Ligue o fone, "
+                "feche outros controladores BLE e defina QCY_H3_BLE_ADDRESS se "
+                "houver mais de um dispositivo compatível."
             )
+        target = matches[0]
         dev = h3s_device.H3SDevice(target)
         await dev.connect()
 

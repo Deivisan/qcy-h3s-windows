@@ -17,7 +17,7 @@ from ble_worker import BleWorker
 from h3s_device import ANCMode, EQ_BAND_LABELS, EQ_PRESET_NAMES, EQ_PRESET_IDS, EQ_PRESET_OFFSETS
 
 
-APP_VERSION = "0.1.0-beta"
+APP_VERSION = "0.1.1-beta"
 MODE_LABELS = ["Desligado", "Transparência", "ANC baixo", "ANC médio", "ANC alto", "ANC máximo", "ANC ultra", "Adaptativo"]
 MODE_HINTS = ["Cancelamento desligado", "Som ambiente", "Nível de redução 1", "Nível de redução 2", "Nível de redução 3", "Nível de redução 4", "Nível de redução 5", "Adaptação automática"]
 MODE_BYTES = ANCMode.ALL
@@ -195,7 +195,7 @@ class MainWindow(QMainWindow):
         brand.setSpacing(2)
         header.addLayout(brand)
         header.addStretch()
-        self._version_badge = QLabel("BETA  ·  0.1.0")
+        self._version_badge = QLabel(f"BETA  ·  {APP_VERSION.removesuffix('-beta')}")
         self._version_badge.setObjectName("versionBadge")
         header.addWidget(self._version_badge)
         help_button = QPushButton("Ajuda")
@@ -324,7 +324,7 @@ class MainWindow(QMainWindow):
         eq_layout.addLayout(footer)
         page_layout.addWidget(eq_card)
 
-        note = QLabel("Independente da QCY · H3S validado · H3 em teste")
+        note = QLabel("Para QCY H3 e H3S · ferramenta independente")
         note.setObjectName("footerNote")
         note.setAlignment(Qt.AlignmentFlag.AlignCenter)
         page_layout.addWidget(note)
@@ -371,8 +371,9 @@ class MainWindow(QMainWindow):
             "<p>Ative o Bluetooth, ligue o fone e use <b>Conectar fone</b>. "
             "Os modos de ruído, Game Mode e equalizador são enviados diretamente pelo BLE.</p>"
             "<h3>Compatibilidade</h3>"
-            "<p>O QCY H3S é o modelo validado nesta versão beta. O H3 padrão pode funcionar, "
-            "mas ainda não foi testado. Alguns estados dependem do firmware do fone.</p>"
+            "<p>O aplicativo foi feito para QCY H3 padrão e QCY H3S. O H3S foi validado "
+            "em hardware; no H3 padrão, a compatibilidade depende da revisão e do firmware. "
+            "Alguns estados e confirmações variam de acordo com o fone.</p>"
             "<h3>Atalhos</h3><p>Ctrl+K conectar · Ctrl+G Game Mode · Ctrl+Enter aplicar EQ · "
             "Ctrl+0 zerar EQ · F1 ajuda</p>"
             "<p>Projeto pessoal independente, sem afiliação oficial com a QCY. "
