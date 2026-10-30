@@ -143,6 +143,18 @@ A comunicação acontece num serviço GATT customizado:
 
 ---
 
+### Chip e firmware
+
+O fone usa um **JieLi JL7018F6** (32-bit dual-core DSP, BT 6.0 + BR/EDR + BLE,
+LDAC/LHDC/AAC/SBC). O estudo completo de viabilidade de firmware — fluxo OTA
+RCSP, quais checagens o fone faz, o container `.UFW` e por que não existe
+assinatura criptográfica — está em
+[`qcy-toolkit/docs/FIRMWARE-JL7018.md`](https://github.com/Deivisan/qcy-toolkit/blob/main/docs/FIRMWARE-JL7018.md).
+
+Resumo: **este projeto não implementa OTA.** Não por falta de protocolo (o
+formato está mapeado), mas porque um flash errado pode brickar o fone e não há
+firmware alternativo para gravar.
+
 ### Protocolo RCSP — formato de pacote
 
 Todos os pacotes seguem a estrutura:
