@@ -1,5 +1,6 @@
 """QCY H3 BLE device controller."""
 import asyncio
+import time
 from typing import Callable
 
 from bleak import BleakClient, BleakScanner
@@ -65,10 +66,13 @@ class ANCMode:
         if sub == 0x03:
             return 1   # Transparência
         if sub == 0x01:
-            if group == 0x01:
-                return 2 + level   # ANC Low/Med/High/Max/Ultra
+            # IMPORTANTE: checar o grupo ANTES do nível. O H3S aceita e devolve
+            # níveis fora da faixa (testado com 0x05, 0x06, 0x0A e 0xFF), então
+            # `2 + level` colidia com o índice 7 do adaptativo e estourava para 8.
             if group == 0x05:
-                return 7           # Adaptativo
+                return 7           # Adaptativo (AI)
+            if group == 0x01 and level <= 4:
+                return 2 + level   # ANC Low..Ultra
         return None
 
 
@@ -538,16 +542,20 @@ class H3SDevice:
         """Enable/disable LED switch (cmd 0x35)."""
         return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x35, 0x01, 0x01 if enabled else 0x00])))
 
-    async def get_led_effect(self) -> Packet | None:
-        """Get LED effect (cmd 0x36)."""
-        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x36])))
-
     # ── Tone ──
 
     async def set_tone_volume(self, volume: int) -> Packet | None:
-        """Set tone/notification volume (cmd 0x1D). Validado em 0-100."""
-        volume = _clamp(volume, 0, 100, "volume")
-        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x1D, 0x01, volume])))
+        """Set tone/notification volume (cmd 0x1D). Faixa real: 0-8.
+
+        O firmware espera `[0x1D, 0x02, volume, 0x00]` - payload de DOIS bytes.
+        Antes daqui o codigo mandava `[0x1D, 0x01, volume]` (um byte) e o fone
+        descartava em silencio: `set_tone_volume(10)` deixava o valor em 6 e
+        ninguem percebia, porque a leitura tambem nao era feita.
+        Medido em 29/10/2026: 0x00..0x08 sao aceitos e ecoados na leitura
+        `1D 02 <valor> 08`; o 4o byte (0x08) e o maximo e pode ir 0x00 no SET.
+        """
+        volume = _clamp(volume, 0, 8, "tone volume")
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x1D, 0x02, volume, 0x00])))
 
     async def play_tone(self, tone_id: int) -> Packet | None:
         """Play test tone (cmd 0x3D)."""
@@ -625,11 +633,47 @@ class H3SDevice:
 
     # ── Touch Button Remap (KEYFUN) ──
 
-    async def set_button_func(self, key_id: int, func_id: int) -> Packet | None:
-        """Remap touch button (cmd 0x2B). key_id: button, func_id: function."""
+    async def set_key_settings(self, triples: list[tuple[int, int, int]]) -> Packet | None:
+        """Grava o mapa de botoes via SET_ADV_INFO (0xC0), tipo 2.
+
+        O APK NAO usa `0x2B` para isso: `BtRcspOpImpl.configKeySettings()` monta
+        um LTV (`packLTVPacket(2, dados)`) e chama `modifyAdvInfo(2, ...)`.
+        Ou seja payload `[len, 0x02, keyNum, action, function, ...]`, com
+        `len = 1 + 3*N`. Para as 15 entradas do H3S: `[0x2E, 0x02, ...]`.
+
+        NUNCA mande lista parcial: o SDK trata a lista inteira como a config
+        completa dos botoes.
+        """
+        value = b"".join(bytes((k & 0xFF, a & 0xFF, f & 0xFF)) for k, a, f in triples)
+        if not value:
+            raise ValueError("lista de botoes vazia")
+        if len(value) > 254:
+            raise ValueError(f"mapa grande demais ({len(triples)} entradas)")
+        ltv = bytes((len(value) + 1, 0x02)) + value
+        return await self.send(Packet(op_code=OpCode.SET_ADV_INFO, params=ltv))
+
+    async def set_adv_info(self, param: bytes) -> Packet | None:
+        """Envia SET_ADV_INFO cru (0xC0). `param` deve ser um LTV completo."""
+        return await self.send(Packet(op_code=OpCode.SET_ADV_INFO, params=param))
+
+    async def set_button_func(self, key_id: int, func_id: int, action: int = 1) -> Packet | None:
+        """Remapeia UM botao (key_id + action) preservando o resto do mapa.
+
+        Le o mapa atual, troca a entrada e regrava a lista inteira. `func_id`
+        0x00 = sem funcao, 0xFF = trocar modo ANC, 0x7F tambem = sem funcao
+        (o APK traduz 127 -> 0 em `changeJL2QCY`).
+        """
         key_id = _clamp(key_id, 0, 255, "key_id")
+        action = _clamp(action, 1, 5, "action")
         func_id = _clamp(func_id, 0, 255, "func_id")
-        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x2B, 0x02, key_id, func_id])))
+        current = await self.get_key_settings()
+        if not current:
+            raise RuntimeError("fone nao devolveu o mapa de botoes; abortando sem gravar")
+        updated = [
+            (k, a, func_id if (k == key_id and a == action) else f)
+            for k, a, f in current
+        ]
+        return await self.set_key_settings(updated)
 
     async def get_button_func(self) -> Packet | None:
         """Get button mapping (cmd 0x2B read)."""
@@ -729,10 +773,6 @@ class H3SDevice:
         """Get music status (cmd 0x3A)."""
         return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x3A])))
 
-    async def get_music_info(self) -> Packet | None:
-        """Get music info (cmd 0x3B)."""
-        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x3B])))
-
     # ── Space Audio Mode ──
 
     async def set_space_audio_mode(self, enabled: bool) -> Packet | None:
@@ -742,6 +782,111 @@ class H3SDevice:
     async def get_space_audio_mode(self) -> Packet | None:
         """Get spatial audio mode (cmd 0x5B read)."""
         return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x5B])))
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Leituras QUE EXISTEM neste firmware
+    #
+    # Varredura de 0x01..0x63 em 29/10/2026: dos 99 command IDs, só 13 respondem
+    # ao `0xFE 0x01 <id>`. Os outros 86 dão timeout — inclusive quase todas as
+    # leituras que o APK sugere (0x2A vento, 0x31 toque, 0x35/0x36 LED, 0x39
+    # foco, 0x40 volume adaptativo, 0x48 sensibilidade, 0x5B espacial, 0x62
+    # wear). Ou seja: escrever nesses IDs pode até funcionar, mas LER de volta
+    # não. Nada de "None" silencioso — quem chama precisa saber disso.
+    # ─────────────────────────────────────────────────────────────────────────
+
+    READABLE = {
+        0x10: "sleep_mode",
+        0x14: "power_manager",
+        0x17: "anc",
+        0x19: "voice_name",
+        0x1D: "tone_volume",
+        0x1F: "standby",
+        0x22: "eq",
+        0x23: "ldac",
+        0x24: "one_to_two",
+        0x2D: "space_sound",
+        0x2E: "music_mode",
+        0x2F: "battery",
+        0x30: "version",
+    }
+
+    async def read_custom(self, cmd: int) -> bytes | None:
+        """Leitura crua `0xFE 0x01 <cmd>`. Retorna os params ou None (timeout)."""
+        resp = await self.send(
+            Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, cmd]))
+        )
+        return resp.params if resp is not None else None
+
+    async def get_ldac(self) -> bool | None:
+        p = await self.read_custom(0x23)
+        return p[2] == 0x01 if p and len(p) >= 3 else None
+
+    async def get_sleep_mode(self) -> int | None:
+        p = await self.read_custom(0x10)
+        return p[2] if p and len(p) >= 3 else None
+
+    async def get_tone_volume(self) -> int | None:
+        p = await self.read_custom(0x1D)
+        return p[2] if p and len(p) >= 3 else None
+
+    async def get_battery_percent(self) -> int | None:
+        """Bateria por AdvType.BATTERY_QUANTITY (3 bytes: pct, left, right)."""
+        pkt = await self.get_adv_info(1 << AdvType.BATTERY_QUANTITY)
+        if not pkt or not pkt.params:
+            return None
+        from rcsp import parse_tlv
+        for t, v in parse_tlv(pkt.params):
+            if t == AdvType.BATTERY_QUANTITY and v:
+                return v[0]
+        return None
+
+    async def get_key_settings(self) -> list[tuple[int, int, int]] | None:
+        """Mapeamento dos botoes fisicos (ADV_TYPE_KEY_SETTINGS = 2).
+
+        Cada entrada e [keyNum, action, function] - formato do
+        `ADVInfoResponse.KeySettings.toData()` do APK. O H3S devolve 15
+        entradas: keyNum 3, 5 e 7, cada um com action 1..5.
+        function 0x7F/0x00 = "sem funcao"; 0xFF = trocar modo ANC.
+        """
+        pkt = await self.get_adv_info(1 << AdvType.KEY_SETTINGS)
+        if not pkt or not pkt.params:
+            return None
+        from rcsp import parse_tlv
+        for t, v in parse_tlv(pkt.params):
+            if t != AdvType.KEY_SETTINGS:
+                continue
+            out = []
+            for i in range(0, len(v) - 2, 3):
+                out.append((v[i], v[i + 1], v[i + 2]))
+            return out
+        return None
+
+    async def get_state(self) -> dict:
+        """Tudo que este firmware sabe responder, numa conexao so."""
+        state: dict = {}
+
+        pct = await self.get_battery_percent()
+        state["battery_pct"] = pct
+
+        anc = await self.get_mode()
+        state["anc_index"] = anc
+        state["anc_name"] = ANCMode.NAMES[anc] if anc is not None and anc < len(ANCMode.NAMES) else None
+
+        state["game_mode"] = await self.get_work_mode()
+        state["eq"] = await self.get_eq()
+        state["ldac"] = await self.get_ldac()
+
+        p = await self.read_custom(0x2D)
+        state["space_sound"] = (p[2] == 0x01) if p and len(p) >= 3 else None
+
+        state["sleep_mode"] = await self.get_sleep_mode()
+        state["tone_volume"] = await self.get_tone_volume()
+
+        p = await self.read_custom(0x30)
+        state["version_raw"] = p.hex(" ") if p else None
+
+        state["key_settings"] = await self.get_key_settings()
+        return state
 
 
 async def scan(timeout: float = 6.0) -> list:
