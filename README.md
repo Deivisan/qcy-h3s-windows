@@ -1,6 +1,10 @@
-# QCY H3S Controller — Windows Edition
+# Controle QCY H3 — Windows
 
-App desktop para Windows que permite controlar o fone de ouvido **QCY H3S** via Bluetooth Low Energy (BLE), sem depender do aplicativo oficial da QCY.
+Aplicativo pessoal e independente para Windows para gerenciar fones **QCY H3 / H3S** via Bluetooth Low Energy (BLE). Interface em português e protocolo direto, sem depender do app oficial.
+
+> **Versão 0.1.0-beta:** H3S validado no hardware disponível. A compatibilidade com o H3 padrão ainda está em teste; reporte resultados para ajudar a validar em outros computadores e firmwares.
+
+![Símbolo do Controle QCY H3](assets/qcy-h3-control.svg)
 
 ---
 
@@ -8,13 +12,13 @@ App desktop para Windows que permite controlar o fone de ouvido **QCY H3S** via 
 
 > Não precisa instalar Python nem nenhuma dependência.
 
-**[⬇ Baixar QCY_H3_Controller.exe](https://github.com/GMarzochi/QCY_H3_WIndowsEdition/releases/latest/download/QCY_H3_Controller.exe)**
+**[Baixar a versão beta 0.1.0](https://github.com/Deivisan/qcy-h3s-windows/releases/tag/v0.1.0-beta)**
 
 ### Como usar
 
 1. Ligue o fone e ative o Bluetooth no PC
-2. Execute o `QCY_H3_Controller.exe`
-3. Clique em **Escanear** — o fone aparecerá na lista
+2. Execute `Controle_QCY_H3_0.1.0-beta.exe`
+3. Clique em **Conectar fone** — o fone aparecerá na lista
 4. Selecione-o e confirme a conexão
 5. Controle ANC, EQ e Game Mode diretamente pelo app
 
@@ -31,6 +35,20 @@ App desktop para Windows que permite controlar o fone de ouvido **QCY H3S** via 
 | **Presets de EQ** | Custom, Default, Pop, Heavy Bass, Rock, Soft, Classic |
 | **Game Mode** | Ativa modo de baixa latência para jogos |
 | **Bateria** | Exibe nível atual, atualiza a cada 60 segundos |
+
+### Atalhos e ajuda
+
+| Atalho | Ação |
+|---|---|
+| `Ctrl+K` | Buscar e conectar fone |
+| `Ctrl+G` | Alternar Game Mode |
+| `Ctrl+Enter` | Aplicar equalizador |
+| `Ctrl+0` | Zerar as bandas do EQ |
+| `F1` | Abrir ajuda e compatibilidade |
+
+Os cartões têm entrada animada sutil, os botões indicam seleção/hover e a tela
+se adapta a janelas menores por rolagem. Os arquivos vetoriais do símbolo e os
+ícones de modo ficam em [`assets/`](assets/).
 
 ---
 
@@ -96,8 +114,8 @@ original nunca funcionou. Detalhes e o porquê em
 ### Instalação
 
 ```bash
-git clone https://github.com/GMarzochi/QCY_H3_WIndowsEdition.git
-cd QCY_H3_WIndowsEdition
+git clone https://github.com/Deivisan/qcy-h3s-windows.git
+cd qcy-h3s-windows
 pip install PySide6 bleak
 python app.py
 ```
@@ -106,9 +124,8 @@ python app.py
 
 ```bash
 pip install pyinstaller
-pyinstaller --windowed --onefile --name "QCY_H3_Controller" \
-    --hidden-import "bleak.backends.winrt" \
-    --collect-all "bleak" app.py
+python tools/build_icon.py
+pyinstaller --noconfirm QCY_H3_Controller.spec
 # Resultado: dist/QCY_H3_Controller.exe
 ```
 
