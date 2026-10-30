@@ -378,6 +378,315 @@ class H3SDevice:
         """Get spatial sound state (cmd 0x2D)."""
         return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x2D])))
 
+    # ── Music & Audio ──
+
+    async def music_control(self, action: int) -> Packet | None:
+        """Music control (cmd 0x04). action: 1=play, 2=pause, 3=prev, 4=next."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x04, 0x01, action])))
+
+    async def set_volume(self, left: int, right: int) -> Packet | None:
+        """Set volume L/R (cmd 0x08). 0-100+."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x08, 0x03, left & 0xFF, right & 0xFF, 0x00])))
+
+    async def set_music_mode(self, mode: int) -> Packet | None:
+        """Set music mode (cmd 0x2E)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x2E, 0x01, mode])))
+
+    async def set_play_mode(self, mode: int) -> Packet | None:
+        """Set play mode (cmd 0x37)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x37, 0x01, mode])))
+
+    async def get_music_state(self) -> Packet | None:
+        """Get music state (cmd 0x3A)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x3A])))
+
+    async def get_music_info(self) -> Packet | None:
+        """Get music info (cmd 0x3B)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x3B])))
+
+    # ── LDAC ──
+
+    async def set_ldac(self, enabled: bool) -> Packet | None:
+        """Enable/disable LDAC (cmd 0x23). Warning: may restart headphone."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x23, 0x01, 0x01 if enabled else 0x00])))
+
+    # ── Sleep / Standby / Power ──
+
+    async def set_sleep_mode(self, enabled: bool) -> Packet | None:
+        """Enable/disable sleep mode (cmd 0x10)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x10, 0x01, 0x01 if enabled else 0x00])))
+
+    async def set_disconnect_power(self, timeout: int) -> Packet | None:
+        """Set disconnect power timeout (cmd 0x1F). timeout in seconds (0=never)."""
+        low = timeout & 0xFF
+        high = (timeout >> 8) & 0xFF
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x1F, 0x02, low, high])))
+
+    async def set_power_manager(self, timeout: int) -> Packet | None:
+        """Set power manager timeout (cmd 0x14)."""
+        low = timeout & 0xFF
+        high = (timeout >> 8) & 0xFF
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x14, 0x04, low, high, 0x00, 0x00])))
+
+    # ── Sync Time ──
+
+    async def sync_time(self, year, month, day, hour, minute, second, weekday=1) -> Packet | None:
+        """Sync device clock (cmd 0x3E). weekday: 1=Mon..7=Sun."""
+        params = bytes([0x3E, 0x07, year % 100, month + 1, day, hour, minute, second, 1 << (weekday - 1)])
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=params))
+
+    # ── Alarm ──
+
+    async def set_alarm(self, data: bytes) -> Packet | None:
+        """Set alarm (cmd 0x3F). data = alarm config bytes."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x3F]) + bytes([len(data)]) + data))
+
+    # ── Take Photo ──
+
+    async def take_photo(self) -> Packet | None:
+        """Remote shutter (cmd 0x1E)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x1E, 0x01, 0x01])))
+
+    # ── Light ──
+
+    async def set_light(self, enabled: bool) -> Packet | None:
+        """Enable/disable flashlight (cmd 0x05)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x05, 0x01, 0x01 if enabled else 0x00])))
+
+    # ── Reset / Pair ──
+
+    async def reset_default(self) -> Packet | None:
+        """Reset to default settings (cmd 0x01)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x01, 0x00])))
+
+    async def clear_pair(self) -> Packet | None:
+        """Clear pairing records (cmd 0x02)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x02, 0x00])))
+
+    async def factory_reset(self) -> Packet | None:
+        """Factory reset (cmd 0x03)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x03, 0x00])))
+
+    # ── TWS ──
+
+    async def set_tws_enable(self, enabled: bool) -> Packet | None:
+        """Enable/disable TWS (cmd 0x34)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x34, 0x01, 0x01 if enabled else 0x00])))
+
+    # ── LED ──
+
+    async def set_led_mode(self, enabled: bool) -> Packet | None:
+        """Enable/disable LED (cmd 0x12)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x12, 0x01, 0x01 if enabled else 0x00])))
+
+    async def get_led_mode(self) -> Packet | None:
+        """Get LED mode (cmd 0x12 read)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x12])))
+
+    async def set_led_switch(self, enabled: bool) -> Packet | None:
+        """Enable/disable LED switch (cmd 0x35)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x35, 0x01, 0x01 if enabled else 0x00])))
+
+    async def get_led_effect(self) -> Packet | None:
+        """Get LED effect (cmd 0x36)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x36])))
+
+    # ── Tone ──
+
+    async def set_tone_volume(self, volume: int) -> Packet | None:
+        """Set tone/notification volume (cmd 0x1D)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x1D, 0x01, volume & 0xFF])))
+
+    async def play_tone(self, tone_id: int) -> Packet | None:
+        """Play test tone (cmd 0x3D)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x3D, 0x01, tone_id & 0xFF])))
+
+    async def set_tone_name(self, name: str) -> Packet | None:
+        """Set voice/tone name language (cmd 0x19)."""
+        data = name.encode("utf-8")
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x19, len(data)]) + data))
+
+    async def set_voice_language(self, lang: int) -> Packet | None:
+        """Set voice language (cmd 0x1A)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x1A, 0x01, lang & 0xFF])))
+
+    # ── Pair Name ──
+
+    async def set_pair_name(self, name: str) -> Packet | None:
+        """Set pairing name (cmd 0x18)."""
+        data = name.encode("utf-8")
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x18, len(data)]) + data))
+
+    async def get_pair_name(self) -> Packet | None:
+        """Get pairing name (cmd 0x18 read)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x18])))
+
+    # ── Balance ──
+
+    async def set_balance(self, balance: int) -> Packet | None:
+        """Set L/R balance (cmd 0x16). balance: -100..100 or 0..255."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x16, 0x01, balance & 0xFF])))
+
+    # ── In-Ear Sensitivity ──
+
+    async def set_inear_sensitivity(self, sensitivity: int) -> Packet | None:
+        """Set in-ear sensitivity (cmd 0x48)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x48, 0x01, sensitivity & 0xFF])))
+
+    async def get_inear_sensitivity(self) -> Packet | None:
+        """Get in-ear sensitivity (cmd 0x48 read)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x48])))
+
+    # ── Compactness / Fit Test ──
+
+    async def set_compactness(self, left: bool, right: bool) -> Packet | None:
+        """Fit test / compactness (cmd 0x11)."""
+        l = 0x01 if left else 0x02
+        r = 0x01 if right else 0x02
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x11, 0x02, l, r])))
+
+    async def get_compactness(self) -> Packet | None:
+        """Get compactness result (cmd 0x11 read)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x11])))
+
+    # ── Adapt Volume ──
+
+    async def set_adapt_volume(self, enabled: bool) -> Packet | None:
+        """Enable/disable adaptive volume (cmd 0x40)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x40, 0x01, 0x01 if enabled else 0x00])))
+
+    async def get_adapt_volume(self) -> Packet | None:
+        """Get adaptive volume state (cmd 0x40 read)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x40])))
+
+    # ── Device Color ──
+
+    async def set_device_color(self, color: int) -> Packet | None:
+        """Set device color (cmd 0x42)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x42, 0x01, color & 0xFF])))
+
+    async def get_device_color(self) -> Packet | None:
+        """Get device color (cmd 0x42 read)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x42])))
+
+    # ── Touch Button Remap (KEYFUN) ──
+
+    async def set_button_func(self, key_id: int, func_id: int) -> Packet | None:
+        """Remap touch button (cmd 0x2B). key_id: button, func_id: function."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x2B, 0x02, key_id & 0xFF, func_id & 0xFF])))
+
+    async def get_button_func(self) -> Packet | None:
+        """Get button mapping (cmd 0x2B read)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x2B])))
+
+    # ── Environment Adaptation ──
+
+    async def set_env_adaptation(self, enabled: bool) -> Packet | None:
+        """Enable/disable environment adaptation (cmd 0x32)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x32, 0x01, 0x01 if enabled else 0x00])))
+
+    async def get_env_adaptation(self) -> Packet | None:
+        """Get environment adaptation (cmd 0x32 read)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x32])))
+
+    # ── LED Effect ──
+
+    async def set_led_effect(self, speed: int, bright: int, effect_index: int, colors: list[int]) -> Packet | None:
+        """Set LED effect (cmd 0x36). colors: list of RGB triples (flat)."""
+        color_bytes = bytearray()
+        for c in colors:
+            color_bytes.append((c >> 16) & 0xFF)
+            color_bytes.append((c >> 8) & 0xFF)
+            color_bytes.append(c & 0xFF)
+        params = bytes([0x36, 3 + len(color_bytes), speed & 0xFF, bright & 0xFF, effect_index & 0xFF]) + bytes(color_bytes)
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=params))
+
+    # ── Focus Mode ──
+
+    async def set_focus_mode(self, enabled: bool) -> Packet | None:
+        """Enable/disable focus mode (cmd 0x39)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x39, 0x01, 0x01 if enabled else 0x00])))
+
+    async def get_focus_mode(self) -> Packet | None:
+        """Get focus mode (cmd 0x39 read)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x39])))
+
+    # ── Privacy Mode ──
+
+    async def set_privacy_mode(self, enabled: bool) -> Packet | None:
+        """Enable/disable privacy mode (cmd 0x5F)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x5F, 0x01, 0x01 if enabled else 0x00])))
+
+    async def get_privacy_mode(self) -> Packet | None:
+        """Get privacy mode (cmd 0x5F read)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x5F])))
+
+    # ── Spatial Sound ──
+
+    async def set_space_sound(self, enabled: bool) -> Packet | None:
+        """Enable/disable spatial sound (cmd 0x2D)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x2D, 0x01, 0x01 if enabled else 0x00])))
+
+    # ── Hearing Safety ──
+
+    async def get_hearing_safety(self) -> Packet | None:
+        """Get hearing safety data (cmd 0x58)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x58])))
+
+    # ── AI ANC Config ──
+
+    async def set_ai_anc_config(self, data: bytes) -> Packet | None:
+        """Set AI ANC config (cmd 0x55)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x55, len(data)]) + data))
+
+    async def set_ai_anc_config2(self, data: bytes) -> Packet | None:
+        """Set AI ANC config v2 (cmd 0x56)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x56, len(data)]) + data))
+
+    async def get_ai_anc_preview(self) -> Packet | None:
+        """Get AI ANC preview (cmd 0x5A)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x5A])))
+
+    # ── Tone Name ──
+
+    async def get_tone_name(self) -> Packet | None:
+        """Get tone/voice name (cmd 0x19 read)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x19])))
+
+    async def get_voice_language(self) -> Packet | None:
+        """Get voice language (cmd 0x1A read)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x1A])))
+
+    # ── Phone Info ──
+
+    async def get_phone_info(self) -> Packet | None:
+        """Get phone info (cmd 0x4D)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x4D])))
+
+    async def get_phone_status(self) -> Packet | None:
+        """Get phone status (cmd 0x4F)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x4F])))
+
+    # ── Music Status/Info ──
+
+    async def get_music_status(self) -> Packet | None:
+        """Get music status (cmd 0x3A)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x3A])))
+
+    async def get_music_info(self) -> Packet | None:
+        """Get music info (cmd 0x3B)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x3B])))
+
+    # ── Space Audio Mode ──
+
+    async def set_space_audio_mode(self, enabled: bool) -> Packet | None:
+        """Enable/disable spatial audio mode (cmd 0x5B)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x5B, 0x01, 0x01 if enabled else 0x00])))
+
+    async def get_space_audio_mode(self) -> Packet | None:
+        """Get spatial audio mode (cmd 0x5B read)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x5B])))
+
 
 async def scan(timeout: float = 6.0) -> list:
     result = await BleakScanner.discover(timeout=timeout, return_adv=True)
