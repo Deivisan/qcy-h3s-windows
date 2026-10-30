@@ -2,7 +2,7 @@
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QColor, QPalette
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QGroupBox, QHBoxLayout, QLabel,
+    QDialog, QDialogButtonBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
     QPushButton, QSlider, QStatusBar, QVBoxLayout, QWidget,
 )
