@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QColor, QPalette
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QGroupBox, QHBoxLayout, QLabel,
-    QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
+    QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
     QPushButton, QSlider, QStatusBar, QVBoxLayout, QWidget,
 )
 
@@ -32,6 +32,10 @@ class ScanDialog(QDialog):
         self._status = QLabel("Escaneando…")
         self._status.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        self._manual_label = QLabel("Ou informe o endereço BLE (pareado) manualmente:")
+        self._manual_input = QLineEdit()
+        self._manual_input.setPlaceholderText("XX:XX:XX:XX:XX:XX")
+
         btns = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -41,6 +45,8 @@ class ScanDialog(QDialog):
         lay = QVBoxLayout(self)
         lay.addWidget(self._status)
         lay.addWidget(self._list)
+        lay.addWidget(self._manual_label)
+        lay.addWidget(self._manual_input)
         lay.addWidget(btns)
 
     def populate(self, devices: list):
@@ -56,6 +62,9 @@ class ScanDialog(QDialog):
             self._list.addItem(item)
 
     def selected_device(self) -> tuple | None:
+        manual = self._manual_input.text().strip()
+        if manual:
+            return (manual, "QCY H3S (manual)")
         item = self._list.currentItem()
         if item:
             return item.data(Qt.ItemDataRole.UserRole)

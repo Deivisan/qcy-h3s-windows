@@ -889,11 +889,110 @@ class H3SDevice:
         return state
 
 
-async def scan(timeout: float = 6.0) -> list:
+# UUID do serviço RCSP/JieLi do QCY H3S (usado para filtrar o scan)
+QCY_SERVICE_UUID = "0000a002-0000-1000-8000-00805f9b34fb"
+
+# Serviços secundários que o QCY H3S anuncia quando já pareado/conectado
+QCY_SECONDARY_SERVICES = ("0000fee8-0000-1000-8000-00805f9b34fb",)
+
+# Marcadores de nome que identificam o fone (case-insensitive)
+QCY_NAME_MARKERS = ("qcy", "kcey", "h3s", "h3 ")
+
+
+def _is_qcy_device(name: str, service_uuids: list) -> bool:
+    """True se o dispositivo parece ser o QCY H3S (por nome ou serviço BLE)."""
+    if name:
+        low = name.lower()
+        if any(m in low for m in QCY_NAME_MARKERS):
+            return True
+    for u in service_uuids or []:
+        ul = str(u).lower()
+        if ul == QCY_SERVICE_UUID or ul in QCY_SECONDARY_SERVICES:
+            return True
+    return False
+
+
+def _resolve_name(name: str, service_uuids: list) -> str:
+    """Garante um nome amigável para dispositivos QCY sem nome no adv."""
+    if name:
+        return name
+    uls = [str(u).lower() for u in (service_uuids or [])]
+    if QCY_SERVICE_UUID in uls or any(s in uls for s in QCY_SECONDARY_SERVICES):
+        return "QCY H3S (BLE)"
+    return ""
+
+
+import subprocess
+
+
+def _paired_qcy_addresses() -> list[str]:
+    """Tenta obter endereços MAC de dispositivos QCY pareados via PowerShell.
+
+    Retorna lista de endereços no formato XX:XX:XX:XX:XX:XX. Usado para
+    detectar fones já pareados que não estão advertising no momento.
+    """
+    out = []
+    try:
+        cmd = [
+            "powershell", "-NoProfile", "-Command",
+            "Get-PnpDevice -Class Bluetooth | "
+            "Where-Object { $_.FriendlyName -match 'QCY' } | "
+            "Select-Object -ExpandProperty InstanceId",
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            # InstanceId formato: BTHENUM\\DEV_84AC6005552C\\...
+            import re
+            m = re.search(r"DEV_([0-9A-Fa-f]{12})", line)
+            if m:
+                hexaddr = m.group(1)
+                addr = ":".join(hexaddr[i:i+2] for i in range(0, 12, 2))
+                if addr not in out:
+                    out.append(addr)
+    except Exception:
+        pass
+    return out
+
+
+async def scan_including_paired(timeout: float = 6.0) -> list:
+    """Scan BLE + tenta incluir fones QCY já pareados que não advertising.
+
+    Para cada endereço pareado não encontrado no scan, tenta
+    find_device_by_address; se o OS conseguir resolvê-lo, adiciona à lista
+    (com nome 'QCY H3S (pareado)'). Isso cobre o caso 'já conectado'.
+    """
+    items = await scan(timeout=timeout, only_qcy=True)
+    found_addrs = {a for a, _, _ in items}
+    for addr in _paired_qcy_addresses():
+        if addr in found_addrs:
+            continue
+        try:
+            dev = await BleakScanner.find_device_by_address(addr, timeout=3.0)
+        except Exception:
+            dev = None
+        if dev is not None:
+            items.append((addr, "QCY H3S (pareado)", None))
+            found_addrs.add(addr)
+    items.sort(key=lambda x: x[2] if x[2] is not None else -999, reverse=True)
+    return items
+
+
+async def scan(timeout: float = 6.0, only_qcy: bool = True) -> list:
+    """Escaneia BLE.
+
+    Por padrão retorna apenas dispositivos QCY H3S (filtrando o ruído de
+    outros aparelhos). Cada item é (address, name, rssi). Dispositivos que
+    anunciam o serviço RCSP mas sem nome recebem o nome 'QCY H3S (BLE)'.
+    """
     result = await BleakScanner.discover(timeout=timeout, return_adv=True)
     items = []
     for dev, adv in result.values():
         name = dev.name or adv.local_name or ""
-        items.append((dev.address, name, adv.rssi))
-    items.sort(key=lambda x: x[2] or -999, reverse=True)
+        svcs = list(adv.service_uuids or [])
+        if only_qcy and not _is_qcy_device(name, svcs):
+            continue
+        items.append((dev.address, _resolve_name(name, svcs), adv.rssi))
+    items.sort(key=lambda x: x[2] if x[2] is not None else -999, reverse=True)
     return items
+

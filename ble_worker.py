@@ -6,7 +6,7 @@ import threading
 
 from PySide6.QtCore import QObject, Signal
 
-from h3s_device import H3SDevice, scan
+from h3s_device import H3SDevice, scan, scan_including_paired
 from rcsp import parse_tlv, AdvType
 
 
@@ -96,7 +96,7 @@ class BleWorker(QObject):
 
     async def _do_scan(self, timeout: float):
         try:
-            devices = await scan(timeout=timeout)
+            devices = await scan_including_paired(timeout=timeout)
             self.scan_result.emit(devices)
         except Exception as e:
             self.error.emit(f"Scan error: {e}")
