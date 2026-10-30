@@ -6,7 +6,7 @@ import threading
 
 from PySide6.QtCore import QObject, Signal
 
-from h3_device import H3Device, scan
+from h3s_device import H3SDevice, scan
 from rcsp import parse_tlv, AdvType
 
 
@@ -23,7 +23,7 @@ class BleWorker(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._device: H3Device | None = None
+        self._device: H3SDevice | None = None
         self._ready = threading.Event()
 
     # ------------------------------------------------------------------
@@ -69,6 +69,24 @@ class BleWorker(QObject):
     def set_game_mode(self, enabled: bool):
         self._submit(self._do_set_game_mode(enabled))
 
+    def find_earphones(self):
+        self._submit(self._do_find_earphones())
+
+    def set_spatial_audio(self, enabled: bool):
+        self._submit(self._do_set_spatial_audio(enabled))
+
+    def set_wind_noise(self, enabled: bool):
+        self._submit(self._do_set_wind_noise(enabled))
+
+    def set_wear_config(self, enabled: bool):
+        self._submit(self._do_set_wear_config(enabled))
+
+    def set_touch_tone(self, enabled: bool):
+        self._submit(self._do_set_touch_tone(enabled))
+
+    def set_ai_anc(self, enabled: bool):
+        self._submit(self._do_set_ai_anc(enabled))
+
     def refresh_status(self):
         self._submit(self._do_refresh())
 
@@ -85,7 +103,7 @@ class BleWorker(QObject):
 
     async def _do_connect(self, address: str):
         try:
-            self._device = H3Device(address)
+            self._device = H3SDevice(address)
             await self._device.connect()
             await self._device.notify_communication_way(way=0, reconnect=0)
             await asyncio.sleep(0.2)
@@ -172,6 +190,66 @@ class BleWorker(QObject):
             await dev.set_game_mode(enabled)
         except Exception as e:
             self.error.emit(f"Erro ao trocar game mode: {e}")
+
+    async def _do_find_earphones(self):
+        dev = self._device
+        if dev is None:
+            self.error.emit("Nao conectado.")
+            return
+        try:
+            await dev.find_earphones()
+        except Exception as e:
+            self.error.emit(f"Erro ao procurar fone: {e}")
+
+    async def _do_set_spatial_audio(self, enabled: bool):
+        dev = self._device
+        if dev is None:
+            self.error.emit("Nao conectado.")
+            return
+        try:
+            await dev.set_spatial_audio(enabled)
+        except Exception as e:
+            self.error.emit(f"Erro ao trocar audio espacial: {e}")
+
+    async def _do_set_wind_noise(self, enabled: bool):
+        dev = self._device
+        if dev is None:
+            self.error.emit("Nao conectado.")
+            return
+        try:
+            await dev.set_wind_noise(enabled)
+        except Exception as e:
+            self.error.emit(f"Erro ao trocar reducao de vento: {e}")
+
+    async def _do_set_wear_config(self, enabled: bool):
+        dev = self._device
+        if dev is None:
+            self.error.emit("Nao conectado.")
+            return
+        try:
+            await dev.set_wear_config(enabled)
+        except Exception as e:
+            self.error.emit(f"Erro ao trocar deteccao de uso: {e}")
+
+    async def _do_set_touch_tone(self, enabled: bool):
+        dev = self._device
+        if dev is None:
+            self.error.emit("Nao conectado.")
+            return
+        try:
+            await dev.set_touch_tone(enabled)
+        except Exception as e:
+            self.error.emit(f"Erro ao trocar tom de toque: {e}")
+
+    async def _do_set_ai_anc(self, enabled: bool):
+        dev = self._device
+        if dev is None:
+            self.error.emit("Nao conectado.")
+            return
+        try:
+            await dev.set_ai_anc(enabled)
+        except Exception as e:
+            self.error.emit(f"Erro ao trocar ANC com IA: {e}")
 
     @property
     def is_connected(self) -> bool:

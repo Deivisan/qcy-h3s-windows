@@ -11,9 +11,11 @@ class ANCMode:
     TRANSPARENCY    = bytes([0x17, 0x03, 0x02, 0x00, 0x00])  # ANC desligado
     NORMAL          = bytes([0x17, 0x03, 0x03, 0x01, 0x04])  # Transparência (ambiente)
 
-    NOISY_LOW       = bytes([0x17, 0x03, 0x01, 0x01, 0x00])  # Ruidoso baixo
-    NOISY_MED       = bytes([0x17, 0x03, 0x01, 0x01, 0x01])  # Ruidoso médio
-    NOISY_HIGH      = bytes([0x17, 0x03, 0x01, 0x01, 0x02])  # Ruidoso alto
+    NOISY_LOW       = bytes([0x17, 0x03, 0x01, 0x01, 0x00])  # Ruído baixo
+    NOISY_MED       = bytes([0x17, 0x03, 0x01, 0x01, 0x01])  # Ruído médio
+    NOISY_HIGH      = bytes([0x17, 0x03, 0x01, 0x01, 0x02])  # Ruído alto
+    NOISY_MAX       = bytes([0x17, 0x03, 0x01, 0x01, 0x03])  # Ruído máximo
+    NOISY_ULTRA     = bytes([0x17, 0x03, 0x01, 0x01, 0x04])  # Ruído ultra (AI)
 
     COMMUTING_LOW   = bytes([0x17, 0x03, 0x01, 0x02, 0x00])  # Transporte baixo
     COMMUTING_MED   = bytes([0x17, 0x03, 0x01, 0x02, 0x01])  # Transporte médio
@@ -24,18 +26,16 @@ class ANCMode:
     INDOOR_HIGH     = bytes([0x17, 0x03, 0x01, 0x03, 0x02])  # Interior alto
 
     ANTIWIND        = bytes([0x17, 0x03, 0x01, 0x04, 0x00])  # Anti-vento
-    ADAPTIVE        = bytes([0x17, 0x03, 0x01, 0x05, 0x00])  # Adaptativo
+    ADAPTIVE        = bytes([0x17, 0x03, 0x01, 0x05, 0x00])  # Adaptativo (AI)
 
     ALL = [
-        TRANSPARENCY,
-        NORMAL,
-        NOISY_LOW, NOISY_MED, NOISY_HIGH,
+        TRANSPARENCY, NORMAL,
+        NOISY_LOW, NOISY_MED, NOISY_HIGH, NOISY_MAX, NOISY_ULTRA,
         ADAPTIVE,
     ]
 
     @staticmethod
     def from_params(params: bytes) -> int | None:
-        """Decode mode index (0-5) from GET 0x17 response params."""
         if len(params) < 5:
             return None
         sub   = params[2]
@@ -47,9 +47,9 @@ class ANCMode:
             return 1   # Transparência
         if sub == 0x01:
             if group == 0x01:
-                return 2 + level   # ANC Low/Med/High → 2,3,4
+                return 2 + level   # ANC Low/Med/High/Max/Ultra
             if group == 0x05:
-                return 5           # Adaptativo
+                return 7           # Adaptativo
         return None
 
 
@@ -99,7 +99,7 @@ WRITE_UUID = "00000001-0000-1000-8000-00805f9b34fb"
 NOTIFY_UUID = "00000002-0000-1000-8000-00805f9b34fb"
 
 
-class H3Device:
+class H3SDevice:
     def __init__(self, address: str):
         self.address = address
         self._client: BleakClient | None = None
@@ -287,6 +287,96 @@ class H3Device:
 
     async def get_battery(self) -> Packet | None:
         return await self.get_adv_info(1 << AdvType.BATTERY_QUANTITY)
+
+    # ── H3S-specific features (Jieli RCSP Custom sub-protocol) ──
+
+    async def get_wind_noise(self) -> Packet | None:
+        """Get wind noise reduction state (cmd 0x2A)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x2A])))
+
+    async def set_wind_noise(self, enabled: bool) -> Packet | None:
+        """Enable/disable wind noise reduction (cmd 0x2A)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x2A, 0x01, 0x01 if enabled else 0x00])))
+
+    async def get_wear_status(self) -> Packet | None:
+        """Get wear detection status (cmd 0x62)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x62])))
+
+    async def set_wear_config(self, enabled: bool) -> Packet | None:
+        """Enable/disable wear detection (cmd 0x2C)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x2C, 0x01, 0x01 if enabled else 0x00])))
+
+    async def get_spatial_audio(self) -> Packet | None:
+        """Get spatial audio mode (cmd 0x5B)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x5B])))
+
+    async def set_spatial_audio(self, enabled: bool) -> Packet | None:
+        """Enable/disable spatial audio (cmd 0x5B)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x5B, 0x01, 0x01 if enabled else 0x00])))
+
+    async def find_earphones(self) -> Packet | None:
+        """Trigger find earphones (play sound) (cmd 0x4B)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x4B, 0x01, 0x01])))
+
+    async def get_ai_anc(self) -> Packet | None:
+        """Get AI ANC state (cmd 0x54)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x54])))
+
+    async def set_ai_anc(self, enabled: bool) -> Packet | None:
+        """Enable/disable AI ANC (cmd 0x54)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x54, 0x01, 0x01 if enabled else 0x00])))
+
+    async def get_hearing_safety(self) -> Packet | None:
+        """Get hearing safety state (cmd 0x58)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x58])))
+
+    async def get_device_info(self) -> Packet | None:
+        """Get device info (cmd 0xF7)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0xF7])))
+
+    async def get_touch_tone(self) -> Packet | None:
+        """Get touch tone state (cmd 0x31)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x31])))
+
+    async def set_touch_tone(self, enabled: bool) -> Packet | None:
+        """Enable/disable touch tone (cmd 0x31)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0x31, 0x01, 0x01 if enabled else 0x00])))
+
+    async def get_power_manager(self) -> Packet | None:
+        """Get power manager info (cmd 0x14)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x14])))
+
+    async def get_head_action(self) -> Packet | None:
+        """Get head action / wear detection config (cmd 0x50)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x50])))
+
+    async def get_focus_mode(self) -> Packet | None:
+        """Get focus mode state (cmd 0x39)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x39])))
+
+    async def get_privacy_mode(self) -> Packet | None:
+        """Get privacy mode state (cmd 0x5F)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x5F])))
+
+    async def get_anc_wear(self) -> Packet | None:
+        """Get ANC wear detection state (cmd 0x29)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x29])))
+
+    async def get_env_adaptation(self) -> Packet | None:
+        """Get environment adaptation state (cmd 0x32)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x32])))
+
+    async def get_led_effect(self) -> Packet | None:
+        """Get LED effect (cmd 0x36)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x36])))
+
+    async def get_led_switch(self) -> Packet | None:
+        """Get LED switch (cmd 0x35)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x35])))
+
+    async def get_space_sound(self) -> Packet | None:
+        """Get spatial sound state (cmd 0x2D)."""
+        return await self.send(Packet(op_code=OpCode.CUSTOM, params=bytes([0xFE, 0x01, 0x2D])))
 
 
 async def scan(timeout: float = 6.0) -> list:

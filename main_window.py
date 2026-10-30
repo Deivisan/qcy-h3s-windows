@@ -1,4 +1,4 @@
-"""QCY H3 Controller - Main Window."""
+"""QCY H3S Controller - Main Window."""
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QColor, QPalette
 from PySide6.QtWidgets import (
@@ -8,10 +8,10 @@ from PySide6.QtWidgets import (
 )
 
 from ble_worker import BleWorker
-from h3_device import ANCMode, EQ_BAND_LABELS, EQ_PRESET_NAMES, EQ_PRESET_IDS, EQ_PRESET_OFFSETS
+from h3s_device import ANCMode, EQ_BAND_LABELS, EQ_PRESET_NAMES, EQ_PRESET_IDS, EQ_PRESET_OFFSETS
 
 
-MODE_LABELS = ["ANC Desligado", "Transparência", "ANC Baixo", "ANC Médio", "ANC Alto", "Adaptativo"]
+MODE_LABELS = ["ANC Desligado", "Transparência", "ANC Baixo", "ANC Médio", "ANC Alto", "ANC Máximo", "ANC Ultra", "Adaptativo (AI)"]
 MODE_BYTES  = ANCMode.ALL
 
 
@@ -117,7 +117,7 @@ class EqBand(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("QCY H3 Controller")
+        self.setWindowTitle("QCY H3S Controller")
         self.setMinimumSize(780, 560)
 
         self._worker = BleWorker(self)
@@ -158,7 +158,7 @@ class MainWindow(QMainWindow):
 
         # ---- Header bar ----
         header = QHBoxLayout()
-        title = QLabel("QCY H3 Controller")
+        title = QLabel("QCY H3S Controller")
         title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         self._battery_label = QLabel("🔋 —")
         self._battery_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -239,6 +239,27 @@ class MainWindow(QMainWindow):
         eq_root.addLayout(eq_btns)
 
         root.addWidget(eq_group)
+
+        # ---- Features group (H3S-specific) ----
+        feat_group = QGroupBox("Recursos H3S")
+        feat_lay = QGridLayout(feat_group)
+        feat_buttons = [
+            ("Encontrar Fone", self._find_earphones),
+            ("Áudio Espacial", self._toggle_spatial),
+            ("Redução de Vento", self._toggle_wind),
+            ("Detecção de Uso", self._toggle_wear),
+            ("Tom de Toque", self._toggle_touch_tone),
+            ("ANC com IA", self._toggle_ai_anc),
+        ]
+        for i, (label, handler) in enumerate(feat_buttons):
+            btn = QPushButton(label)
+            btn.setEnabled(False)
+            btn.clicked.connect(handler)
+            feat_lay.addWidget(btn, i // 3, i % 3)
+            setattr(self, f"_feat_btn_{i}", btn)
+        self._feat_buttons = [getattr(self, f"_feat_btn_{i}") for i in range(len(feat_buttons))]
+        root.addWidget(feat_group)
+
         root.addStretch()
 
         # ---- Status bar ----
@@ -258,6 +279,8 @@ class MainWindow(QMainWindow):
         for band in self._eq_bands:
             band.setEnabled(connected)
         for btn in self._eq_preset_buttons:
+            btn.setEnabled(connected)
+        for btn in self._feat_buttons:
             btn.setEnabled(connected)
         if not connected:
             self._device_label.setText("Não conectado")
@@ -357,4 +380,49 @@ class MainWindow(QMainWindow):
         offsets = [b.value_hundredths() for b in self._eq_bands]
         preset_id = EQ_PRESET_IDS[self._active_preset_idx]
         self._worker.set_eq(offsets, preset_id)
+
+    # ---- H3S feature handlers ----
+    def _find_earphones(self):
+        self._worker.find_earphones()
+        self.statusBar().showMessage("Procurando fone...")
+
+    def _toggle_spatial(self):
+        btn = self._feat_buttons[1]
+        enabled = not btn.property("active")
+        btn.setProperty("active", enabled)
+        self._worker.set_spatial_audio(enabled)
+        label = "ativado" if enabled else "desativado"
+        self.statusBar().showMessage(f"Áudio Espacial {label}.")
+
+    def _toggle_wind(self):
+        btn = self._feat_buttons[2]
+        enabled = not btn.property("active")
+        btn.setProperty("active", enabled)
+        self._worker.set_wind_noise(enabled)
+        label = "ativado" if enabled else "desativado"
+        self.statusBar().showMessage(f"Redução de Vento {label}.")
+
+    def _toggle_wear(self):
+        btn = self._feat_buttons[3]
+        enabled = not btn.property("active")
+        btn.setProperty("active", enabled)
+        self._worker.set_wear_config(enabled)
+        label = "ativado" if enabled else "desativado"
+        self.statusBar().showMessage(f"Detecção de Uso {label}.")
+
+    def _toggle_touch_tone(self):
+        btn = self._feat_buttons[4]
+        enabled = not btn.property("active")
+        btn.setProperty("active", enabled)
+        self._worker.set_touch_tone(enabled)
+        label = "ativado" if enabled else "desativado"
+        self.statusBar().showMessage(f"Tom de Toque {label}.")
+
+    def _toggle_ai_anc(self):
+        btn = self._feat_buttons[5]
+        enabled = not btn.property("active")
+        btn.setProperty("active", enabled)
+        self._worker.set_ai_anc(enabled)
+        label = "ativado" if enabled else "desativado"
+        self.statusBar().showMessage(f"ANC com IA {label}.")
         self.statusBar().showMessage(f"EQ aplicado ({EQ_PRESET_NAMES[self._active_preset_idx]}).")

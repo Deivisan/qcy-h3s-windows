@@ -1,6 +1,6 @@
-# QCY H3 Controller — Windows Edition
+# QCY H3S Controller — Windows Edition
 
-App desktop para Windows que permite controlar o fone de ouvido **QCY H3** via Bluetooth Low Energy (BLE), sem depender do aplicativo oficial da QCY.
+App desktop para Windows que permite controlar o fone de ouvido **QCY H3S** via Bluetooth Low Energy (BLE), sem depender do aplicativo oficial da QCY.
 
 ---
 
@@ -69,7 +69,7 @@ qcy_h3/
 ├── app.py            # Ponto de entrada — inicializa Qt e abre a janela
 ├── main_window.py    # Interface gráfica (PySide6)
 ├── ble_worker.py     # Worker BLE em thread separada (asyncio + Qt signals)
-├── h3_device.py      # Protocolo do dispositivo QCY H3
+├── h3_device.py      # Protocolo do dispositivo QCY H3S
 └── rcsp.py           # Implementação do protocolo RCSP/JieLi
 ```
 
@@ -79,7 +79,7 @@ qcy_h3/
 
 ### Visão geral
 
-O QCY H3 se comunica via **Bluetooth Low Energy (BLE)** usando o protocolo proprietário **JieLi RCSP** (*Remote Control Service Protocol*), desenvolvido pela JieLi Technology (杰理科技) — fabricante do chip do fone.
+O QCY H3S se comunica via **Bluetooth Low Energy (BLE)** usando o protocolo proprietário **JieLi RCSP** (*Remote Control Service Protocol*), desenvolvido pela JieLi Technology (杰理科技) — fabricante do chip do fone.
 
 A comunicação acontece num serviço GATT customizado:
 
