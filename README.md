@@ -34,6 +34,28 @@ App desktop para Windows que permite controlar o fone de ouvido **QCY H3S** via 
 
 ---
 
+## ⚠️ Comandos destrutivos
+
+Este projeto fala o protocolo RCSP/Jieli direto no fone. Alguns comandos **não
+têm volta** e o fone reinicia no meio deles.
+
+| Comando | Efeito |
+|---------|--------|
+| `set_ldac` (`0x23`) | liga/desliga LDAC — **o fone reinicia** e o A2DP cai |
+| `reset_default` (`0x01`) | volta todas as configurações ao padrão |
+| `clear_pair` (`0x02`) | apaga os registros de pareamento |
+| `factory_reset` (`0x03`) | reset de fábrica |
+
+No servidor MCP essas quatro tools **exigem confirmação explícita**
+(`confirm="SET_LDAC"`, `confirm="FACTORY_RESET"`, ...), rodam uma por vez e
+entram em quarentena depois de executar.
+
+**Leia antes de usar:** [`docs/COMANDOS-DESTRUTIVOS.md`](docs/COMANDOS-DESTRUTIVOS.md)
+— auditoria completa dos ~85 command IDs, com os que são de propósito **não**
+expostos (OTA, TESTMODE, SENSOR_TEST, ATPX, PAIRNAME).
+
+---
+
 ## Executar a partir do código-fonte
 
 ### Pré-requisitos
